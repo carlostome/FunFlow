@@ -15,17 +15,18 @@ library
                  Type,
                  Parsing
   exposed-modules : Main
-  build-depends   : base >= 4.5,
-                    uu-parsinglib >= 2.8,
-                    monad-supply >= 0.3,
+  build-depends   : base,
+                    uu-parsinglib,
+                    monad-supply,
                     mtl,
                     errors,
                     transformers,
-                    containers >= 0.5,
+                    containers,
                     bound,
-                    monad-gen,
                     prelude-extras,
-                    ansi-wl-pprint
+                    ansi-wl-pprint,
+                    monad-gen,
+                    bifunctors
 
   hs-source-dirs  : src
 
