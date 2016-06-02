@@ -5,7 +5,6 @@
 module Expr where
 
 import           Data.Bifunctor.TH
-import           System.IO                    (stdout)
 import           Text.PrettyPrint.ANSI.Leijen as PP
 
 type Pi    = Int     -- For numbering lambda's etc. that can then be tracked in the analysis
@@ -64,8 +63,6 @@ instance Show Op where
     Sub ->  "-"
     Mul ->  "*"
     Div ->  "/"
-
-printExpr doc  = displayIO stdout (renderPretty 0.4 100 (pretty doc)) >> putChar '\n'
 
 $(deriveBifunctor ''Expr)
 $(deriveBifoldable ''Expr)
