@@ -7,31 +7,34 @@
 module Type
   ( Ty (..)
   , TyScheme(..)
-  , unify
   , Subst
   , empty
   , o
   , Substitutable(..)
+  , Constraint(..)
+  , Ann(..)
   )
   where
 
 import           Bound.Class
 import           Bound.Scope.Simple
 import           Control.Monad      (ap)
+import           Data.Bifunctor
+import           Data.Bifunctor.TH
 import           Data.Foldable
 import qualified Data.List          as L
 import           Data.Map           (Map)
-import qualified Data.Map           as M
+import qualified Data.Map           as Map
 import           Data.Monoid
+import           Data.Set           (Set)
+import qualified Data.Set           as Set
 import           Data.Void
 import           Prelude.Extras
-import           Data.Bifunctor.TH
-import Data.Bifunctor
 
 -- | Ground type
 -- Parametrized over type variables and annotation
 -- variables.
-data Ty b a = V a
+data Ty b a = TyV a
             | B
             | I
             | Arrow (Ty b a) b (Ty b a)
@@ -43,51 +46,44 @@ data TyScheme b a = Base (Ty b a)
                   | Forall (Scope Int (Ty b) a)
                   deriving (Functor, Foldable, Traversable)
 
--- | Type unification
-unify :: (Ord a, Ord b) => Ty b a -> Ty b a -> Maybe (Subst b a)
-unify I I   = Just empty
-unify B B   = Just empty
-unify (V f1) (V f2)
-  | f1 == f2  = Just empty
-  | otherwise = Just (M.singleton f1 (V f2), M.empty)
-unify (Arrow t1 a t2) (Arrow t1' a' t2') = do
-  let phi0 = (M.empty, M.singleton a a')
-  phi1 <- unify (apply phi0 t1) (apply phi0 t1')
-  phi2 <- unify (apply phi1 . apply phi0 $ t2)
-                (apply phi1 . apply phi0 $ t2')
-  return (phi2 `o` phi1 `o` phi0)
-unify (V f1) t
-  | occursCheck f1 t = Nothing
-  | otherwise        = Just (M.singleton f1 t, M.empty)
-unify t (V f1)
-  | occursCheck f1 t = Nothing
-  | otherwise        = Just (M.singleton f1 t, M.empty)
-unify _ _ = Nothing
+-- | Simple annotations
+data Ann a b = AnnV a
+             | PP b
+             | Union (Ann a b) (Ann a b)
+             | Empty
+             deriving (Functor, Foldable, Traversable, Eq, Ord)
 
--- | Occurs check
-occursCheck :: Eq a => a -> Ty b a -> Bool
-occursCheck a = getAny . foldMap (Any . (==a))
+instance Monoid (Ann a b) where
+  mempty  = Empty
+  mappend = Union
+
+data Constraint b a = EqC a (Ann b a)
+                    deriving (Functor, Foldable, Traversable, Eq, Ord)
+
 
 -- | Substitution
-type Subst b a = (Map a (Ty b a), Map b b)
+-- We maintain the invariant that in a concrete
+-- substitution, all annotation variables have
+-- been already substituted.
+type Subst b a = Map a (Ty b a)
 
 -- | Empty substitution
-empty = (M.empty, M.empty)
+empty = Map.empty
 
 -- | Compose two substitutions
 o :: (Ord a, Ord b) => Subst b a -> Subst b a -> Subst b a
-o (s1,s2) (s1', s2') = undefined--(M.map (apply (s1,s2)) s1' `M.union` s1, M.map s2')
+o s1 s2 = Map.map (apply s1) s2 `Map.union` s1
 
 class Substitutable m where
   apply :: (Ord a, Ord b) => Subst b a -> m b a -> m b a
 
 instance Substitutable Ty where
-  apply (s1,s2) t = first (\x -> M.findWithDefault x x s2) (t >>= (\v -> M.findWithDefault (V v) v s1))
+  apply s t = t >>= (\v -> Map.findWithDefault (TyV v) v s)
 
 instance Substitutable TyScheme where
-  apply s@(s1,s2) (Base t)   = Base $ apply s t
-  apply s@(s1,s2) (Forall e) =
-    Forall (e >>>= (\v -> M.findWithDefault (V v) v s1))
+  apply s (Base t)   = Base $ apply s t
+  apply s (Forall e) =
+    Forall (e >>>= (\v -> Map.findWithDefault (TyV v) v s))
 
 --------------------------------------------------------------------------------
 -- Various instances
@@ -96,7 +92,7 @@ instance Substitutable TyScheme where
 instance (Show b, Show a) => Show (Ty b a) where
   show B  = "Bool"
   show I  = "Integer"
-  show (V a) = show a
+  show (TyV a) = show a
   show (Arrow t1 ann t2) = "(" ++ show t1 ++ " -" ++ show ann
                            ++ "-> " ++ show t2 ++ ")"
 
@@ -105,13 +101,22 @@ instance (Show a, Show b) => Show (TyScheme b a) where
   show (Forall s) = "forall " ++ unwords (map show (bindings s))
                     ++ ". " ++ show (fromScope s)
 
+instance (Show a, Show b) => Show (Ann b a) where
+  show (AnnV a) = show a
+  show (PP p)   = "{" ++ show p ++ "}"
+  show (Union a b) = show a ++ " U " ++ show b
+  show Empty       = "o"
+
+instance (Show a, Show b) => Show (Constraint b a) where
+  show (EqC a ann) = show a ++ "=" ++ show ann
+
 instance Applicative (Ty b) where
   pure = return
   (<*>) = ap
 
 instance Monad (Ty b) where
-  return = V
-  (V a) >>= f = f a
+  return = TyV
+  (TyV a) >>= f = f a
   B   >>= _ = B
   I   >>= _ = I
   (Arrow t1 ann t2) >>= f = Arrow (t1 >>= f) ann (t2 >>= f)
@@ -119,3 +124,7 @@ instance Monad (Ty b) where
 $(deriveBifunctor ''Ty)
 $(deriveBifoldable ''Ty)
 $(deriveBitraversable ''Ty)
+
+$(deriveBifunctor ''Ann)
+$(deriveBifoldable ''Ann)
+$(deriveBitraversable ''Ann)

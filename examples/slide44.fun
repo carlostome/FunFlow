@@ -1,4 +1,3 @@
-let f = fn x => x + 1 in
-let g = fn y => y * 2 in
-let h = fn z => z 3 in
-h g + h f
+fn h => let f = fn x => x + 1 in
+        let g = fn y => y * 2 in
+        h g + h f

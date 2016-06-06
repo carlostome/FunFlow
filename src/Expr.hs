@@ -12,23 +12,23 @@ type Name  = String  -- For identifier names
 
 -- | Expr type parametrized over program points
 --   and annotations.
-data Expr b a
+data Expr a
   = Integer Integer
   | Bool    Bool
   | Var     Name
-  | Fun     b a  Name Name (Expr b a)
-  | Fn      b a  Name (Expr b a)
-  | App     (Expr b a) (Expr b a)
-  | Let     Name (Expr b a) (Expr b a)
-  | ITE     (Expr b a) (Expr b a) (Expr b a)
-  | Oper    Op   (Expr b a) (Expr b a)
+  | Fun     a  Name Name (Expr a)
+  | Fn      a  Name (Expr a)
+  | App     (Expr a) (Expr a)
+  | Let     Name (Expr a) (Expr a)
+  | ITE     (Expr a) (Expr a) (Expr a)
+  | Oper    Op   (Expr a) (Expr a)
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data Op
    = Add | Sub | Mul | Div
   deriving (Eq)
 
-bin :: Name -> Expr b a -> Expr b a -> Expr b a
+bin :: Name -> Expr a -> Expr a -> Expr a
 bin op = Oper r where
   r = case op of
         "+" -> Add
@@ -36,15 +36,15 @@ bin op = Oper r where
         "*" -> Mul
         "/" -> Div
 
-instance (Show b, Show a) => Pretty (Expr b a) where
+instance (Show a) => Pretty (Expr a) where
   pretty (Integer n) = pretty n
   pretty (Bool b)    = pretty b
   pretty (Var n)     = text n
-  pretty (Fun p ann f x e) =
-    parens $ hsep [bold (text "fun"), text . show $ p, text . show $ ann, text f, text x
+  pretty (Fun p f x e) =
+    parens $ hsep [bold (text "fun"), text . show $ p, text f, text x
                   ,bold (text "=>"), pretty e]
-  pretty (Fn p ann x e) =
-    hsep [bold (text "fn"), text . show $ p , text . show $ ann,  text x, bold (text "=>"), pretty e]
+  pretty (Fn p x e) =
+    hsep [bold (text "fn"), text . show $ p ,  text x, bold (text "=>"), pretty e]
   pretty (App e1 e2) =
     hsep [pretty e1 , pretty e2]
   pretty (Let n e e2) =
@@ -64,6 +64,6 @@ instance Show Op where
     Mul ->  "*"
     Div ->  "/"
 
-$(deriveBifunctor ''Expr)
-$(deriveBifoldable ''Expr)
-$(deriveBitraversable ''Expr)
+{- $(deriveBifunctor ''Expr) -}
+{- $(deriveBifoldable ''Expr) -}
+{- $(deriveBitraversable ''Expr) -}

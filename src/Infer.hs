@@ -1,7 +1,6 @@
 {-# LANGUAGE TupleSections #-}
 module Infer
-  ( analyzeExpr
-  ) where
+where
 
 import           Expr
 import           Type
@@ -17,90 +16,145 @@ import           Data.Foldable
 import           Data.Functor.Identity
 import           Data.List                 as L
 import           Data.Map                  (Map)
-import qualified Data.Map                  as M
+import qualified Data.Map                  as Map
 import           Data.Maybe
+import           Data.Monoid
+import           Data.Set                  (Set)
+import qualified Data.Set                  as Set
+import           Data.Void
 
 -- | Top level function for analyzing an Expr.
 -- It outputs the type annotated Expr and its type.
-analyzeExpr :: Expr () ()
-            -> Maybe (Expr Pi (Ty Int Int), Ty Int Int)
+analyzeExpr :: Expr Pi
+            -> Maybe (Ty AnnVar TyVar, Set (Constraint Pi AnnVar))
 analyzeExpr e =
-  case runGen . runGenT . runMaybeT . algorithmW M.empty $ uniquifyPPoints e of
+  case runGenFrom '`' . runGenT . runMaybeT . algorithmW Map.empty $ e of
     Nothing -> Nothing
-    Just (e', t, s) -> return (second (apply s) e', t)
+    Just (t, s, c )-> return (t, c)
+
+f :: InferM a -> Maybe a
+f = runGen . runGenT . runMaybeT
+
+type TyVar = Char
+type AnnVar = Int
 
 -- | Make program points unique.
 -- Care with calling the function without specifying e.
-uniquifyPPoints :: Expr b a -> Expr Pi a
-uniquifyPPoints = runGen . bimapM (const gen) return
+uniquifyPPoints :: Expr () -> Expr Pi
+uniquifyPPoints = runGen . traverse (const gen)
 
 type Env b a = Map Name (TyScheme b a)
 
 extend :: Name -> TyScheme b a -> Env b a -> Env b a
-extend = M.insert
+extend = Map.insert
 
-type InferM a = MaybeT (GenT Int (Gen Int)) a
+type InferM a = MaybeT (GenT AnnVar (Gen TyVar)) a
 
-freshTyVar :: InferM (Ty b Int)
-freshTyVar = V <$> gen
+freshTyVar :: InferM (Ty b Char)
+freshTyVar = lift . lift $ TyV <$> gen
 
 freshAnnVar :: InferM Int
-freshAnnVar = lift gen
+freshAnnVar = gen
 
 -- | Main algorithm-W implementation.
 -- It make use of Maybe monad to handle
 -- failure and Gen monad to generate fresh
 -- type variable names.
-algorithmW :: Env Int Int
-           -> Expr Int ()
-           -> InferM (Expr Int (Ty Int Int), Ty Int Int, Subst Int Int)
+algorithmW :: Env Int TyVar
+           -> Expr Pi
+           -> InferM (Ty Int TyVar, Subst Int TyVar, Set (Constraint Int Int))
 algorithmW env expr =
   case expr of
-    Integer n -> return (Integer n, I, empty)
-    Bool    b -> return (Bool b, B, empty)
+    Integer n -> return (I, empty, mempty)
+
+    Bool    b -> return (B, empty, mempty)
+
     Var n     -> do
-      ty <- hoistMaybe $ M.lookup n env
+      ty <- hoistMaybe $ Map.lookup n env
       i  <- lift . lift $ instantiate ty
-      return (Var n, i, empty)
-    Fun pi _ f x e    -> do
+      return (i, empty, mempty)
+
+    Fun pi f x e    -> do
       a1 <- freshTyVar
       a2 <- freshTyVar
       beta <- freshAnnVar
-      (e', t2,phi1) <- algorithmW (extend f (Base (Arrow a1 beta a2)) (extend x (Base a1) env)) e
-      phi2          <- hoistMaybe $ unify t2 (apply phi1 a2)
-      let t = Arrow (apply (phi2 `o` phi1) a1) (M.findWithDefault beta beta (snd $ phi2 `o` phi1)) (apply phi2 a2)
-      return (Fun pi t f x e', t,phi2 `o` phi1)
-    Fn  pi _   n e -> do
+      (t2,phi1,c0) <- algorithmW (extend f (Base (Arrow a1 beta a2)) (extend x (Base a1) env)) e
+      (phi2,c2)    <- unify t2 (apply phi1 a2)
+      let t = Arrow (apply (phi2 `o` phi1) a1) beta (apply phi2 a2)
+      return (t, phi2 `o` phi1, c0 <> c2)
+
+    Fn  pi n e -> do
       alpha <- freshTyVar
       beta  <- freshAnnVar
-      (e', t2, phi)  <- algorithmW (extend n (Base alpha) env)  e
-      let t = Arrow (apply phi alpha) beta t2
-      return (Fn pi t n e', t, phi)
+      (t2, phi, c0)  <- algorithmW (extend n (Base alpha) env)  e
+      return ( Arrow (apply phi alpha) beta t2
+             , phi
+             , Set.singleton (EqC beta (PP pi)) <>  c0)
+
     App     e1 e2 -> do
-      (e1', t1, phi1) <- algorithmW env e1
-      (e2', t2, phi2) <- algorithmW (M.map (apply phi1) env) e2
+      (t1, phi1, c1) <- algorithmW env e1
+      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
       alpha <- freshTyVar
       beta  <- freshAnnVar
-      phi3  <- hoistMaybe $ unify (apply phi2 t1) (Arrow t2 beta alpha)
-      return (App e1' e2',apply phi3 alpha, phi3 `o` phi2 `o` phi1)
+      (phi3, c3)  <- unify (apply phi2 t1) (Arrow t2 beta alpha)
+      return ( apply phi3 alpha
+             , phi3 `o` phi2 `o` phi1
+             , c1 <> c2 <> c3)
+
     Let     n e1 e2  -> do
-      (e1', t1, phi1) <- algorithmW env e1
-      let nEnv = M.map (apply phi1) env
-      (e2', t, phi2)  <- algorithmW (extend n (generalize (foldMap toList nEnv) t1) nEnv) e2
-      return (Let n e1' e2', t, phi2 `o` phi1)
+      (t1, phi1, c1) <- algorithmW env e1
+      let nEnv = Map.map (apply phi1) env
+      (t, phi2, c2)  <- algorithmW (extend n (generalize (foldMap toList nEnv) t1) nEnv) e2
+      return (t, phi2 `o` phi1, c1 <> c2)
+
     ITE     e1 e2 e3 -> do
-      (e1', t1, phi1) <- algorithmW env e1
-      (e2', t2, phi2) <- algorithmW (M.map (apply phi1) env) e2
-      (e3', t3, phi3) <- algorithmW (M.map (apply phi2 . apply phi1) env) e3
-      phi4 <- hoistMaybe $ unify ((apply phi3 . apply phi2) t1) B
-      phi5 <- hoistMaybe $ unify ((apply phi4 . apply phi3) t2) (apply phi4 t3)
-      return (ITE e1' e2' e3', (apply phi5 . apply phi4) t3, phi5 `o` phi4 `o` phi3 `o` phi2 `o` phi1)
+      (t1, phi1, c1) <- algorithmW env e1
+      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      (t3, phi3, c3) <- algorithmW (Map.map (apply phi2 . apply phi1) env) e3
+      (phi4, c4) <-  unify ((apply phi3 . apply phi2) t1) B
+      (phi5, c5) <-  unify ((apply phi4 . apply phi3) t2) (apply phi4 t3)
+      return (( apply phi5 . apply phi4) t3
+             , phi5 `o` phi4 `o` phi3 `o` phi2 `o` phi1
+             , c1 <> c2 <> c3 <> c4 <> c5)
+
     Oper    op e1 e2 -> do
-      (e1', t1, phi1) <- algorithmW env e1
-      (e2', t2, phi2) <- algorithmW (M.map (apply phi1) env) e2
-      phi3 <- hoistMaybe $ unify (apply phi2 t1) (tOp op)
-      phi4 <- hoistMaybe $ unify (apply phi3 t2) (tOp op)
-      return (Oper op e1' e2', tOp op, phi4 `o` phi3 `o` phi2 `o` phi1)
+      (t1, phi1, c1) <- algorithmW env e1
+      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      (phi3, c3) <-  unify (apply phi2 t1) (tOp op)
+      (phi4, c4) <-  unify (apply phi3 t2) (tOp op)
+      return ( tOp op
+             , phi4 `o` phi3 `o` phi2 `o` phi1
+             , c1 <> c2 <> c3 <> c4)
+
+-- | Type unification
+unify :: (Ord a, Ord b, Monad m)
+      => Ty b a
+      -> Ty b a
+      -> MaybeT m (Subst b a, Set (Constraint b b))
+unify I I   = just (Map.empty, mempty)
+unify B B   = just (Map.empty, mempty)
+unify (TyV f1) (TyV f2)
+    | f1 == f2  = just (empty, mempty)
+    | otherwise = just (Map.singleton f1 (TyV f2), mempty)
+unify (Arrow t1 a t2) (Arrow t1' a' t2') = do
+  (phi0, c0) <- unify t1 t1'
+  (phi1, c1) <- unify (apply phi0 t2)
+                      (apply phi0 t2')
+  return (phi1 `o` phi0, c0 <> c1 <> Set.singleton (EqC a (AnnV a')))
+unify (TyV f1) t
+  | occursCheck f1 t = nothing
+  | otherwise        = just (Map.singleton f1 t, mempty)
+unify t (TyV f1)
+  | occursCheck f1 t = nothing
+  | otherwise        = just (Map.singleton f1 t, mempty)
+unify _ _ = nothing
+
+-- | Occurs check
+occursCheck :: Eq a => a -> Ty b a -> Bool
+occursCheck a = getAny . foldMap (Any . (==a))
+
+{- data TyErr b a = TyErrOccursCheck (Ty b a) -}
+{-                | TyErrMismatch    (Ty b a) (Ty b a) -}
 
 tOp :: Op -> Ty b a
 tOp op =
@@ -110,14 +164,27 @@ tOp op =
     Mul -> I
     Div -> I
 
+{- solveConstraints :: (Show b, Ord b) => [C b b] -> Map b (Ann a b) -}
+{- solveConstraints = go M.empty -}
+{-   where -}
+{-     go m [] = m -}
+{-     go m (c@(b :> AnnV p : xs)) = -}
+{-       case (M.lookup b m, M.lookup p m) of -}
+{-         (Nothing,Nothing) -> go m (xs ++ c) -}
+{-         (Just x,Nothing)  -> go (M.insert p x m) xs -}
+{-         (Nothing,Just x)  -> go (M.insert b x m) xs -}
+{-         (Just x,Just y)   -> go (M.insert b (Union y x) m) xs -}
+{-     go m (b :> PP p : xs) = go (M.insertWith Union b (PP p) m) xs -}
+
+
 -- | Instantiate a type scheme with fresh variables
 -- drawn from the Gen monad.
 instantiate :: (Eq a, Enum a) => TyScheme b a -> Gen a (Ty b a)
 instantiate (Base t)     = return t
 instantiate (Forall s)   = do
   let bvars = L.nub $ B.bindings s
-  nvars <- M.fromList <$> mapM (\x -> (x,) <$> gen) bvars
-  return $ B.instantiate V (B.mapBound (fromJust . flip M.lookup nvars) s)
+  nvars <- Map.fromList <$> mapM (\x -> (x,) <$> gen) bvars
+  return $ B.instantiate TyV (B.mapBound (fromJust . flip Map.lookup nvars) s)
 
 -- | Generalize a type by turning it into a type scheme
 -- and bounding all variables not present in the list.

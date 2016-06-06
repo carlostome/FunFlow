@@ -26,7 +26,8 @@ library
                     prelude-extras,
                     ansi-wl-pprint,
                     monad-gen,
-                    bifunctors
+                    bifunctors,
+                    recursion-schemes
 
   hs-source-dirs  : src
 

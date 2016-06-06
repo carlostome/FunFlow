@@ -16,11 +16,11 @@ import Text.ParserCombinators.UU.BasicInstances (Parser,pSym)
 
 -- * Top-Level Parsers
 
-parseExpr :: String -> Expr () ()
+parseExpr :: String -> Expr ()
 parseExpr = runParser "stdin" pExpr
 
 -- * Parsing the FUN language
-pExpr :: Parser (Expr () ())
+pExpr :: Parser (Expr ())
 pExpr = (pFn <|> pFun <|> pITE <|> pLet) <<|> pBin
   where
 
@@ -35,9 +35,9 @@ pExpr = (pFn <|> pFun <|> pITE <|> pLet) <<|> pBin
      <<|> pParens pExpr
 
   -- simple expressions
-  pFn,pFun,pLet,pITE :: Parser (Expr () ())
-  pFn     = iI (Fn () ())  "fn" pIdent "=>" pExpr Ii -- Default Pi to 0
-  pFun    = iI (Fun () ()) "fun" pIdent pIdent "=>" pExpr Ii -- Dito
+  pFn,pFun,pLet,pITE :: Parser (Expr ())
+  pFn     = iI (Fn () )  "fn" pIdent "=>" pExpr Ii -- Default Pi to 0
+  pFun    = iI (Fun () ) "fun" pIdent pIdent "=>" pExpr Ii -- Dito
   pLet    = iI Let "let" pIdent "=" pExpr "in" pExpr Ii
   pITE    = iI ITE "if" pExpr "then" pExpr "else" pExpr Ii
 
