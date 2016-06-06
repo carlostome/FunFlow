@@ -38,6 +38,8 @@ data Ty b a = TyV a
             | B
             | I
             | Arrow (Ty b a) b (Ty b a)
+            | Prod (Ty b a) b (Ty b a)
+            | List b (Ty b a)
             deriving (Foldable, Functor, Traversable)
 
 -- | Type scheme.
@@ -95,6 +97,8 @@ instance (Show b, Show a) => Show (Ty b a) where
   show (TyV a) = show a
   show (Arrow t1 ann t2) = "(" ++ show t1 ++ " -" ++ show ann
                            ++ "-> " ++ show t2 ++ ")"
+  show (Prod t1 ann t2)  = show t1 ++ " x" ++ show ann ++ " " ++ show t2
+  show (List ann t) = "[" ++ show t ++ "]" ++ show ann
 
 instance (Show a, Show b) => Show (TyScheme b a) where
   show (Base t)   = show t

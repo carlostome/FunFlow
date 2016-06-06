@@ -21,7 +21,8 @@ parseExpr = runParser "stdin" pExpr
 
 -- * Parsing the FUN language
 pExpr :: Parser (Expr ())
-pExpr = (pFn <|> pFun <|> pITE <|> pLet) <<|> pBin
+pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pPCase
+        <|> pLCons <|> pLNil <|> pLCase) <<|> pBin
   where
 
   -- literal expressions
@@ -41,6 +42,17 @@ pExpr = (pFn <|> pFun <|> pITE <|> pLet) <<|> pBin
   pLet    = iI Let "let" pIdent "=" pExpr "in" pExpr Ii
   pITE    = iI ITE "if" pExpr "then" pExpr "else" pExpr Ii
 
+  pPair,pPCase :: Parser (Expr ())
+  pPair   = iI (Pair ()) "Pair" "(" pExpr "," pExpr ")" Ii
+  pPCase  = iI PCase "pcase" pExpr "of" "Pair" "(" pIdent "," pIdent ")" "=>"
+               pExpr Ii
+
+  pLCons, pLNil, pLCase :: Parser (Expr ())
+  pLCons   = iI (LCons ()) "Cons" "(" pExpr "," pExpr ")" Ii
+  pLNil    = LNil () <$ pSymbol "Nil"
+  pLCase   = iI LCase "lcase" pExpr "of" "Cons" "(" pIdent "," pIdent ")" "=>"
+               pExpr "or" pIdent "=>" pExpr Ii
+
   -- chained expressions
   pApp = pChainl_ng (App <$ pSpaces) pAtom
   pBin = pChainl_ng (bin <$> pOper) pApp
@@ -52,6 +64,7 @@ pOper  = lexeme $ pSome $ pAnySym "*+/-"
 
 pUnderscore :: Parser Char
 pUnderscore = pSym '_'
+
 
 -- * Recognising more list structures with separators
 

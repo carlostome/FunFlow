@@ -75,29 +75,29 @@ algorithmW env expr =
       return (i, empty, mempty)
 
     Fun pi f x e    -> do
-      a1 <- freshTyVar
-      a2 <- freshTyVar
-      beta <- freshAnnVar
-      (t2,phi1,c0) <- algorithmW (extend f (Base (Arrow a1 beta a2)) (extend x (Base a1) env)) e
-      (phi2,c2)    <- unify t2 (apply phi1 a2)
-      let t = Arrow (apply (phi2 `o` phi1) a1) beta (apply phi2 a2)
+      a_1 <- freshTyVar
+      a_2 <- freshTyVar
+      b   <- freshAnnVar
+      (t2,phi1,c0) <- algorithmW (extend f (Base (Arrow a_1 b a_2)) (extend x (Base a_1) env)) e
+      (phi2,c2)    <- unify t2 (apply phi1 a_2)
+      let t = Arrow (apply (phi2 `o` phi1) a_1) b (apply phi2 a_2)
       return (t, phi2 `o` phi1, c0 <> c2)
 
     Fn  pi n e -> do
-      alpha <- freshTyVar
-      beta  <- freshAnnVar
-      (t2, phi, c0)  <- algorithmW (extend n (Base alpha) env)  e
-      return ( Arrow (apply phi alpha) beta t2
+      a <- freshTyVar
+      b <- freshAnnVar
+      (t2, phi, c0)  <- algorithmW (extend n (Base a) env)  e
+      return ( Arrow (apply phi a) b t2
              , phi
-             , Set.singleton (EqC beta (PP pi)) <>  c0)
+             , Set.singleton (EqC b (PP pi)) <>  c0)
 
     App     e1 e2 -> do
       (t1, phi1, c1) <- algorithmW env e1
       (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      alpha <- freshTyVar
-      beta  <- freshAnnVar
-      (phi3, c3)  <- unify (apply phi2 t1) (Arrow t2 beta alpha)
-      return ( apply phi3 alpha
+      a <- freshTyVar
+      b <- freshAnnVar
+      (phi3, c3)  <- unify (apply phi2 t1) (Arrow t2 b a)
+      return ( apply phi3 a
              , phi3 `o` phi2 `o` phi1
              , c1 <> c2 <> c3)
 
@@ -125,6 +125,26 @@ algorithmW env expr =
       return ( tOp op
              , phi4 `o` phi3 `o` phi2 `o` phi1
              , c1 <> c2 <> c3 <> c4)
+
+    -- Pairs
+    Pair pi e1 e2 -> do
+      (t1, phi1, c1) <- algorithmW env e1
+      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      b <- freshAnnVar
+      return ( Prod (apply phi2 t1) b t2
+             , phi2 `o` phi1
+             , c1 <> c2 <> Set.singleton (EqC b (PP pi)))
+
+    PCase e0 x1 x2 e1 -> do
+      (t0, phi0, c0) <- algorithmW env e0
+      a_0 <- freshTyVar
+      a_1 <- freshTyVar
+      b   <- freshAnnVar
+      (phi1, c1) <- unify t0 (Prod a_0 b a_1)
+      (t2, phi2, c2) <- undefined
+      return ( t2
+             , phi2 `o` phi1
+             , c0 <> c1 <> c2)
 
 -- | Type unification
 unify :: (Ord a, Ord b, Monad m)
