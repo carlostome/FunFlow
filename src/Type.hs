@@ -13,6 +13,7 @@ module Type
   , Substitutable(..)
   , Constraint(..)
   , Ann(..)
+  , TyErr (..)
   )
   where
 
@@ -30,6 +31,7 @@ import           Data.Set           (Set)
 import qualified Data.Set           as Set
 import           Data.Void
 import           Prelude.Extras
+import Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 
 -- | Ground type
 -- Parametrized over type variables and annotation
@@ -63,6 +65,11 @@ data Constraint b a = EqC a (Ann b a)
                     deriving (Functor, Foldable, Traversable, Eq, Ord)
 
 
+data TyErr b a = TyErrOccursCheck a (Ty b a)
+               | TyErrUnify       (Ty b a) (Ty b a)
+               | TyErrInternal String
+               deriving Show
+
 -- | Substitution
 -- We maintain the invariant that in a concrete
 -- substitution, all annotation variables have
@@ -91,6 +98,17 @@ instance Substitutable TyScheme where
 -- Various instances
 --------------------------------------------------------------------------------
 
+instance Applicative (Ty b) where
+  pure = return
+  (<*>) = ap
+
+instance Monad (Ty b) where
+  return = TyV
+  (TyV a) >>= f = f a
+  B   >>= _ = B
+  I   >>= _ = I
+  (Arrow t1 ann t2) >>= f = Arrow (t1 >>= f) ann (t2 >>= f)
+
 instance (Show b, Show a) => Show (Ty b a) where
   show B  = "Bool"
   show I  = "Integer"
@@ -99,6 +117,7 @@ instance (Show b, Show a) => Show (Ty b a) where
                            ++ "-> " ++ show t2 ++ ")"
   show (Prod t1 ann t2)  = show t1 ++ " x" ++ show ann ++ " " ++ show t2
   show (List ann t) = "[" ++ show t ++ "]" ++ show ann
+
 
 instance (Show a, Show b) => Show (TyScheme b a) where
   show (Base t)   = show t
@@ -114,16 +133,28 @@ instance (Show a, Show b) => Show (Ann b a) where
 instance (Show a, Show b) => Show (Constraint b a) where
   show (EqC a ann) = show a ++ "=" ++ show ann
 
-instance Applicative (Ty b) where
-  pure = return
-  (<*>) = ap
+instance (Pretty a, Pretty b) => Pretty (Ty b a) where
+  pretty B  = text "Bool"
+  pretty I  = text "Integer"
+  pretty (TyV a) = pretty a
+  pretty (Arrow t1 ann t2) =
+    parens (hsep [pretty t1, pretty ann PP.<> text "->"
+                 , pretty t2])
+  pretty (Prod t1 ann t2)  =
+    hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
+  pretty (List ann t) =
+    brackets (pretty t) PP.<> pretty ann
 
-instance Monad (Ty b) where
-  return = TyV
-  (TyV a) >>= f = f a
-  B   >>= _ = B
-  I   >>= _ = I
-  (Arrow t1 ann t2) >>= f = Arrow (t1 >>= f) ann (t2 >>= f)
+instance (Pretty a, Pretty b) => Pretty (TyErr b a) where
+  pretty err =
+    hsep [text "There was an"
+            , (bold . red . text $ "error") PP.<> colon]
+    PP.<$>
+    (indent 2 $
+      case err of
+        TyErrOccursCheck v t -> hsep [text "Occurs check failed:", pretty v, pretty t]
+        TyErrUnify t k -> hsep  [text "Cannot", underline $ text "unify", bold $ pretty t, text "with", bold $ pretty k]
+        TyErrInternal s -> hsep [text "Internal error:",  text s])
 
 $(deriveBifunctor ''Ty)
 $(deriveBifoldable ''Ty)

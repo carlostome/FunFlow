@@ -22,24 +22,20 @@ import           Data.Monoid
 import           Data.Set                  (Set)
 import qualified Data.Set                  as Set
 import           Data.Void
+import Control.Monad.Trans.Except
 
 -- | Top level function for analyzing an Expr.
 -- It outputs the type annotated Expr and its type.
 analyzeExpr :: Expr Pi
-            -> Maybe (Ty AnnVar TyVar, Set (Constraint Pi AnnVar))
-analyzeExpr e =
-  case runGenFrom '`' . runGenT . runMaybeT . algorithmW Map.empty $ e of
-    Nothing -> Nothing
-    Just (t, s, c )-> return (t, c)
+            -> Either (TyErr AnnVar TyVar) (Ty AnnVar TyVar, Subst AnnVar TyVar ,Set (Constraint Pi AnnVar))
+analyzeExpr =
+  runGenFrom '`' . runGenT
+  . runExceptT . algorithmW Map.empty
 
-f :: InferM a -> Maybe a
-f = runGen . runGenT . runMaybeT
-
-type TyVar = Char
+type TyVar  = Char
 type AnnVar = Int
 
 -- | Make program points unique.
--- Care with calling the function without specifying e.
 uniquifyPPoints :: Expr () -> Expr Pi
 uniquifyPPoints = runGen . traverse (const gen)
 
@@ -48,7 +44,8 @@ type Env b a = Map Name (TyScheme b a)
 extend :: Name -> TyScheme b a -> Env b a -> Env b a
 extend = Map.insert
 
-type InferM a = MaybeT (GenT AnnVar (Gen TyVar)) a
+type InferM a = ExceptT (TyErr AnnVar TyVar)
+                        (GenT AnnVar (Gen TyVar)) a
 
 freshTyVar :: InferM (Ty b Char)
 freshTyVar = lift . lift $ TyV <$> gen
@@ -69,10 +66,12 @@ algorithmW env expr =
 
     Bool    b -> return (B, empty, mempty)
 
-    Var n     -> do
-      ty <- hoistMaybe $ Map.lookup n env
-      i  <- lift . lift $ instantiate ty
-      return (i, empty, mempty)
+    Var n     ->
+      case Map.lookup n env of
+        Just ty -> do
+          i  <- lift . lift $ instantiate ty
+          return (i, empty, mempty)
+        Nothing -> throwE (TyErrInternal ("Variable lookup fail: " ++ show n))
 
     Fun pi f x e    -> do
       a_1 <- freshTyVar
@@ -141,40 +140,44 @@ algorithmW env expr =
       a_1 <- freshTyVar
       b   <- freshAnnVar
       (phi1, c1) <- unify t0 (Prod a_0 b a_1)
-      (t2, phi2, c2) <- undefined
+      (t2, phi2, c2) <- algorithmW (extend x2 (apply phi1 (Base a_1))
+                        $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply phi1) env) e1
       return ( t2
              , phi2 `o` phi1
              , c0 <> c1 <> c2)
 
--- | Type unification
+-- | Type unification.
 unify :: (Ord a, Ord b, Monad m)
       => Ty b a
       -> Ty b a
-      -> MaybeT m (Subst b a, Set (Constraint b b))
-unify I I   = just (Map.empty, mempty)
-unify B B   = just (Map.empty, mempty)
+      -> ExceptT (TyErr b a) m (Subst b a, Set (Constraint b b))
+unify I I   = return (Map.empty, mempty)
+unify B B   = return (Map.empty, mempty)
 unify (TyV f1) (TyV f2)
-    | f1 == f2  = just (empty, mempty)
-    | otherwise = just (Map.singleton f1 (TyV f2), mempty)
+    | f1 == f2  = return (empty, mempty)
+    | otherwise = return (Map.singleton f1 (TyV f2), mempty)
 unify (Arrow t1 a t2) (Arrow t1' a' t2') = do
   (phi0, c0) <- unify t1 t1'
   (phi1, c1) <- unify (apply phi0 t2)
                       (apply phi0 t2')
   return (phi1 `o` phi0, c0 <> c1 <> Set.singleton (EqC a (AnnV a')))
 unify (TyV f1) t
-  | occursCheck f1 t = nothing
-  | otherwise        = just (Map.singleton f1 t, mempty)
+  | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
+  | otherwise        = return (Map.singleton f1 t, mempty)
 unify t (TyV f1)
-  | occursCheck f1 t = nothing
-  | otherwise        = just (Map.singleton f1 t, mempty)
-unify _ _ = nothing
+  | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
+  | otherwise        = return (Map.singleton f1 t, mempty)
+unify (Prod t1 a t2) (Prod t1' a' t2') = do
+  (phi0, c0) <- unify t1 t1'
+  (phi1, c1) <- unify (apply phi0 t2)
+                      (apply phi0 t2')
+  return (phi1 `o` phi0, c0 <> c1 <> Set.singleton (EqC a (AnnV a')))
+unify t k = throwE (TyErrUnify t k)
 
 -- | Occurs check
 occursCheck :: Eq a => a -> Ty b a -> Bool
 occursCheck a = getAny . foldMap (Any . (==a))
 
-{- data TyErr b a = TyErrOccursCheck (Ty b a) -}
-{-                | TyErrMismatch    (Ty b a) (Ty b a) -}
 
 tOp :: Op -> Ty b a
 tOp op =
