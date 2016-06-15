@@ -10,8 +10,8 @@ import           Control.Error.Util
 import           Control.Monad.Gen
 import           Control.Monad.State
 import           Control.Monad.Trans.Maybe
-import           Data.Bifunctor            (second)
-import           Data.Bitraversable        (bimapM)
+import           Data.Bifunctor            (first)
+import           Data.Bitraversable        (bimapM, bimapAccumL)
 import           Data.Foldable
 import           Data.Functor.Identity
 import           Data.List                 as L
@@ -23,21 +23,33 @@ import           Data.Set                  (Set)
 import qualified Data.Set                  as Set
 import           Data.Void
 import Control.Monad.Trans.Except
+import Debug.Trace
+
 
 -- | Top level function for analyzing an Expr.
 -- It outputs the type annotated Expr and its type.
-analyzeExpr :: Expr Pi
-            -> Either (TyErr AnnVar TyVar) (Ty AnnVar TyVar, Subst AnnVar TyVar ,Set (Constraint Pi AnnVar))
-analyzeExpr =
-  runGenFrom '`' . runGenT
-  . runExceptT . algorithmW Map.empty
+analyzeExpr :: AnnF Pi ()
+            -> Either (TyErr AnnVar TyVar) ( AnnF Pi (Maybe (Ty (Set Pi) TyVar))
+                                           , AnnF Pi (Maybe (Ty Int TyVar))
+                                           , Ty AnnVar TyVar
+                                           , Subst AnnVar TyVar
+                                           , Set (Constraint Pi AnnVar))
+analyzeExpr e = do
+  (an, t, s, c) <- runGenFrom '`' . runGenT
+                 . runExceptT . algorithmW Map.empty $ e
+  return (fmap (fmap (flip replaceAnn (solveConstraints (Set.toList c))) . fmap (apply s)) an
+         , an
+         , t, s, c)
 
-type TyVar  = Char
-type AnnVar = Int
+type Pi     = Char -- Program points (we use uppercase letters begining in P)
+type TyVar  = Char -- Type variables
+type AnnVar = Int  -- Annotation variables
 
 -- | Make program points unique.
-uniquifyPPoints :: Expr () -> Expr Pi
-uniquifyPPoints = runGen . traverse (const gen)
+uniquifyPPoints :: AnnF () a -> AnnF Pi a
+uniquifyPPoints = snd . bimapAccumL (\acc _ -> (succ acc, acc)) (\a d -> (a,d)) 'P'
+
+-- mapAccumL :: Traversable t => (a -> b -> (a, c)) -> a -> t b -> (a, t c) 
 
 type Env b a = Map Name (TyScheme b a)
 
@@ -57,127 +69,194 @@ freshAnnVar = gen
 -- It make use of Maybe monad to handle
 -- failure and Gen monad to generate fresh
 -- type variable names.
-algorithmW :: Env Int TyVar
-           -> Expr Pi
-           -> InferM (Ty Int TyVar, Subst Int TyVar, Set (Constraint Int Int))
-algorithmW env expr =
+algorithmW :: Env AnnVar TyVar
+           -> AnnF Pi ()
+           -> InferM ( AnnF Pi (Maybe (Ty Int TyVar))
+                     , Ty Int TyVar
+                     , Subst Int TyVar
+                     , Set (Constraint Pi AnnVar))
+algorithmW env (AnnF _ expr) =
   case expr of
-    Integer n -> return (I, empty, mempty)
+    Integer n -> return (noann (Integer n), I, mempty, mempty)
 
-    Bool    b -> return (B, empty, mempty)
+    Bool    b -> return (noann (Bool b) , B, mempty, mempty)
 
     Var n     ->
       case Map.lookup n env of
         Just ty -> do
-          i  <- lift . lift $ instantiate ty
-          return (i, empty, mempty)
-        Nothing -> throwE (TyErrInternal ("Variable lookup fail: " ++ show n))
+          i   <- lift . lift $ instantiate ty
+          b_0 <- freshAnnVar
+          let (t, c0) = subeffecting b_0 i
+          return (ann t (Var n) ,  t, mempty, c0)
+        Nothing ->
+          throwE (TyErrInternal ("Variable lookup fail: " ++ show n))
 
     Fun pi f x e    -> do
+      a_0 <- freshTyVar
       a_1 <- freshTyVar
-      a_2 <- freshTyVar
-      b   <- freshAnnVar
-      (t2,phi1,c0) <- algorithmW (extend f (Base (Arrow a_1 b a_2)) (extend x (Base a_1) env)) e
-      (phi2,c2)    <- unify t2 (apply phi1 a_2)
-      let t = Arrow (apply (phi2 `o` phi1) a_1) b (apply phi2 a_2)
-      return (t, phi2 `o` phi1, c0 <> c2)
+      b_0 <- freshAnnVar
+      (e',t1,phi1,c1) <- algorithmW (extend f (Base (Arrow a_0 b_0 a_1)) (extend x (Base a_0) env)) e
+      phi2    <- unify t1 (apply phi1 a_1)
+      let t = Arrow (apply (phi2 <> phi1) a_0) b_0 (apply phi2 a_1)
+      return ( noann (Fun pi f x e')
+             , t
+             , phi2 <> phi1
+             , (b_0 >: pi) <> c1)
 
-    Fn  pi n e -> do
-      a <- freshTyVar
-      b <- freshAnnVar
-      (t2, phi, c0)  <- algorithmW (extend n (Base a) env)  e
-      return ( Arrow (apply phi a) b t2
+    Fn  pi f e -> do
+      a_0 <- freshTyVar
+      (e', t1, phi, c0)  <- algorithmW (extend f (Base a_0) env)  e
+      b_0 <- freshAnnVar
+      let t = Arrow (apply phi a_0) b_0 t1
+      return ( noann (Fn pi f e')
+             , t
              , phi
-             , Set.singleton (EqC b (PP pi)) <>  c0)
+             , (b_0 >: pi) <>  c0)
 
     App     e1 e2 -> do
-      (t1, phi1, c1) <- algorithmW env e1
-      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      a <- freshTyVar
-      b <- freshAnnVar
-      (phi3, c3)  <- unify (apply phi2 t1) (Arrow t2 b a)
-      return ( apply phi3 a
-             , phi3 `o` phi2 `o` phi1
-             , c1 <> c2 <> c3)
+      (e1', t1, phi1, c1) <- algorithmW env e1
+      (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+
+      a_0 <- freshTyVar
+      b_0 <- freshAnnVar
+
+      phi3 <- unify (apply phi2 t1) (Arrow t2 b_0 a_0)
+
+      let    t      = apply (phi3 <> phi2) a_0
+
+      return ( noann (App e1' e2')
+             , t
+             , phi3 <> phi2 <> phi1
+             , c1 <> c2 <> t2 `flows` apply (phi3 <> phi2) t1)
 
     Let     n e1 e2  -> do
-      (t1, phi1, c1) <- algorithmW env e1
+      (e1', t1, phi1, c1) <- algorithmW env e1
       let nEnv = Map.map (apply phi1) env
-      (t, phi2, c2)  <- algorithmW (extend n (generalize (foldMap toList nEnv) t1) nEnv) e2
-      return (t, phi2 `o` phi1, c1 <> c2)
+      (e2', t, phi2, c2)  <- algorithmW (extend n (generalize (foldMap toList nEnv) t1) nEnv) e2
+      return ( noann (Let n e1' e2')
+             , t
+             , phi2 <> phi1
+             , c1 <> c2)
 
     ITE     e1 e2 e3 -> do
-      (t1, phi1, c1) <- algorithmW env e1
-      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      (t3, phi3, c3) <- algorithmW (Map.map (apply phi2 . apply phi1) env) e3
-      (phi4, c4) <-  unify ((apply phi3 . apply phi2) t1) B
-      (phi5, c5) <-  unify ((apply phi4 . apply phi3) t2) (apply phi4 t3)
-      return (( apply phi5 . apply phi4) t3
-             , phi5 `o` phi4 `o` phi3 `o` phi2 `o` phi1
-             , c1 <> c2 <> c3 <> c4 <> c5)
+      (e1', t1, phi1, c1) <- algorithmW env e1
+      (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      (e3', t3, phi3, c3) <- algorithmW (Map.map (apply (phi2 <> phi1)) env) e3
+
+      phi4 <-  unify (apply (phi3 <> phi2) t1) B
+      phi5 <-  unify (apply (phi4 <> phi3) t2) (apply phi4 t3)
+
+      b_0 <- freshAnnVar
+
+      return ( noann (ITE e1' e2' e3')
+             , rep b_0 (apply (phi4 <> phi3) t2)
+             , phi5 <> phi4 <> phi3 <> phi2 <> phi1
+             , c1 <> c2 <> c3 <> sub b_0 t2 <> sub b_0 t3)
 
     Oper    op e1 e2 -> do
-      (t1, phi1, c1) <- algorithmW env e1
-      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      (phi3, c3) <-  unify (apply phi2 t1) (tOp op)
-      (phi4, c4) <-  unify (apply phi3 t2) (tOp op)
-      return ( tOp op
-             , phi4 `o` phi3 `o` phi2 `o` phi1
-             , c1 <> c2 <> c3 <> c4)
+      (e1', t1, phi1, c1) <- algorithmW env e1
+      (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      phi3 <-  unify (apply phi2 t1) (tOp op)
+      phi4 <-  unify (apply phi3 t2) (tOp op)
+      return ( noann (Oper op e1' e2')
+             , tOp op
+             , phi4 <> phi3 <> phi2 <> phi1
+             , c1 <> c2)
 
     -- Pairs
     Pair pi e1 e2 -> do
-      (t1, phi1, c1) <- algorithmW env e1
-      (t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      b <- freshAnnVar
-      return ( Prod (apply phi2 t1) b t2
-             , phi2 `o` phi1
-             , c1 <> c2 <> Set.singleton (EqC b (PP pi)))
+      (e1', t1, phi1, c1) <- algorithmW env e1
+      (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
+      b_0 <- freshAnnVar
+      let t = Prod (apply phi2 t1) b_0 t2
+      return ( noann (Pair pi e1' e2')
+             , t
+             , phi2 <> phi1
+             , c1 <> c2 <> b_0 >: pi)
 
-    PCase e0 x1 x2 e1 -> do
-      (t0, phi0, c0) <- algorithmW env e0
+    PCase e0 x1 x2 e2 -> do
+      (e0', t0, phi0, c0) <- algorithmW env e0
       a_0 <- freshTyVar
       a_1 <- freshTyVar
-      b   <- freshAnnVar
-      (phi1, c1) <- unify t0 (Prod a_0 b a_1)
-      (t2, phi2, c2) <- algorithmW (extend x2 (apply phi1 (Base a_1))
-                        $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply phi1) env) e1
-      return ( t2
-             , phi2 `o` phi1
-             , c0 <> c1 <> c2)
+      b_0 <- freshAnnVar
+      phi1 <- unify t0 (Prod a_0 b_0 a_1)
+      (e2', t2, phi2, c2) <- algorithmW (extend x2 (apply phi1 (Base a_1))
+                          $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply (phi1 <> phi0)) env) e2
+      return ( ann t2 (PCase e0' x1 x2 e2')
+             , t2
+             , phi2 <> phi1
+             , c0 <> c2)
 
+    {- -- Lists -}
+    {- LNil pi -> do -}
+    {-   a_0 <- freshTyVar -}
+    {-   b_0 <- freshAnnVar -}
+    {-   return (List b_0 a_0, empty, b_0 >: pi) -}
+
+    {- LCons pi e0 e1 -> do -}
+    {-   (t0, phi0, c0) <- algorithmW env e0 -}
+    {-   (t1, phi1, c1) <- algorithmW (Map.map (apply phi0) env) e1 -}
+    {-   b_0 <- freshAnnVar -}
+    {-   phi2           <- unify t1 (List b_0 (apply phi1 t0)) -}
+    {-   b_1 <- freshAnnVar -}
+    {-   return ( List b_1 (apply (phi2 `o` phi1) t0) -}
+    {-          , phi2 `o` phi1 `o` phi0 -}
+    {-          , c0 <> c1 <> (b_1 >: pi)) -}
+
+
+-- | This function implementes subeffecting to relax the requirement
+-- that two types with some kind of annotation variable point one to
+-- the other. To avoid poisoning we do not update the environment.
+-- To call this function both types must have been unified and performed
+-- substitution before.
+flows (Arrow _ b _) (Arrow (Arrow _ c _) _ _) = Set.fromList [C c (AnnV b)]
+flows _ _ = mempty
+
+sub b (Arrow t c s) = Set.fromList [C b (AnnV c)]
+sub _ t =  mempty
+
+rep b (Arrow t _ s) = Arrow t b s
+rep _ t = t
+
+get (Arrow t c s) = [c]
+get t = []
+
+interest (Arrow _ _ _) = True
+interest _ = False
+subeffecting b (Arrow t a s) = (Arrow t b s, Set.fromList [C b (AnnV a)])
+subeffecting _ t = (t, mempty)
 -- | Type unification.
-unify :: (Ord a, Ord b, Monad m)
+-- Unification only works on types as originally defined.
+-- It does not deal in any case with annotation variables.
+unify :: (Ord a, Ord b)
       => Ty b a
       -> Ty b a
-      -> ExceptT (TyErr b a) m (Subst b a, Set (Constraint b b))
-unify I I   = return (Map.empty, mempty)
-unify B B   = return (Map.empty, mempty)
+      -> InferM (Subst b a)
+unify I I   = return  mempty
+unify B B   = return  mempty
 unify (TyV f1) (TyV f2)
-    | f1 == f2  = return (empty, mempty)
-    | otherwise = return (Map.singleton f1 (TyV f2), mempty)
+    | f1 == f2  = return mempty
+    | otherwise = return (f1 ~> TyV f2)
 unify (Arrow t1 a t2) (Arrow t1' a' t2') = do
-  (phi0, c0) <- unify t1 t1'
-  (phi1, c1) <- unify (apply phi0 t2)
-                      (apply phi0 t2')
-  return (phi1 `o` phi0, c0 <> c1 <> Set.singleton (EqC a (AnnV a')))
+  phi0 <- unify t1 t1'
+  phi1 <- unify (apply phi0 t2) (apply phi0 t2')
+  return ( phi1 <> phi0 )
 unify (TyV f1) t
   | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
-  | otherwise        = return (Map.singleton f1 t, mempty)
+  | otherwise        = return (f1 ~> t)
 unify t (TyV f1)
   | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
-  | otherwise        = return (Map.singleton f1 t, mempty)
-unify (Prod t1 a t2) (Prod t1' a' t2') = do
-  (phi0, c0) <- unify t1 t1'
-  (phi1, c1) <- unify (apply phi0 t2)
-                      (apply phi0 t2')
-  return (phi1 `o` phi0, c0 <> c1 <> Set.singleton (EqC a (AnnV a')))
+  | otherwise        = return (f1 ~> t)
+unify (Prod t1 _ t2) (Prod t1' _ t2') = do
+  phi0 <- unify t1 t1'
+  phi1 <- unify (apply phi0 t2) (apply phi0 t2')
+  return (phi1 <> phi0)
+unify (List _ t1) (List _ t1') = unify t1 t1'
 unify t k = throwE (TyErrUnify t k)
 
 -- | Occurs check
 occursCheck :: Eq a => a -> Ty b a -> Bool
-occursCheck a = getAny . foldMap (Any . (==a))
-
+occursCheck = elem
 
 tOp :: Op -> Ty b a
 tOp op =
@@ -187,18 +266,40 @@ tOp op =
     Mul -> I
     Div -> I
 
-{- solveConstraints :: (Show b, Ord b) => [C b b] -> Map b (Ann a b) -}
-{- solveConstraints = go M.empty -}
-{-   where -}
-{-     go m [] = m -}
-{-     go m (c@(b :> AnnV p : xs)) = -}
-{-       case (M.lookup b m, M.lookup p m) of -}
-{-         (Nothing,Nothing) -> go m (xs ++ c) -}
-{-         (Just x,Nothing)  -> go (M.insert p x m) xs -}
-{-         (Nothing,Just x)  -> go (M.insert b x m) xs -}
-{-         (Just x,Just y)   -> go (M.insert b (Union y x) m) xs -}
-{-     go m (b :> PP p : xs) = go (M.insertWith Union b (PP p) m) xs -}
+-- | Solve the set of generated constraints.
+--   return a map from annotation variables to sets of pp.
+solveConstraints :: [Constraint Pi AnnVar] -> Map AnnVar (Set Pi)
+solveConstraints cs =
+      -- initial map with all variable map to empty set
+  let init = Map.fromList . map (,Set.empty) . nub
+           . concatMap toList $ cs
 
+      -- recursive workhorse function.
+      go m []     = m
+      go m (C b (AnnV a):xs) =
+        let (Just sb, Just sa) = (Map.lookup b m, Map.lookup a m)
+        in if sa `Set.isSubsetOf` sb
+            then go m xs
+            else go (Map.insertWith Set.union b sa m) (xs ++ involved b)
+
+      go m (C b (AnnS a):xs) =
+        let Just s = Map.lookup b m
+        in if a `Set.isSubsetOf` s
+            then go m xs
+            else go (Map.insertWith Set.union b a m) (xs ++ involved b)
+
+      involved b =
+        filter (\c@(C v a) -> v == b || case a of
+                                          AnnV a' -> a' == b
+                                          _ -> False ) cs
+
+  in go init cs
+
+replaceAnn :: Ty AnnVar a
+           -> Map AnnVar (Set Pi)
+           -> Ty (Set Pi) a
+replaceAnn t m =
+  first (\v -> fromMaybe Set.empty (Map.lookup v m)) t
 
 -- | Instantiate a type scheme with fresh variables
 -- drawn from the Gen monad.

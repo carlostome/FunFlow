@@ -2,7 +2,10 @@ module Main (
   analyzeExpr,
   parseExpr,
   printExpr,
+  parseFile,
   run,
+  runFile,
+  runExpr
   ) where
 
 import           Expr
@@ -14,33 +17,37 @@ import           Data.Map                     (Map)
 import           Data.Set                     (Set)
 import           Text.PrettyPrint.ANSI.Leijen
 import           System.IO (stdout)
+import Data.Set as S
 
 -- |Parse and label program
-parse :: String -> IO (Expr ())
-parse programName = do
+parseFile :: String -> IO (AnnF () ())
+parseFile programName = do
   let fileName = programName
   content <- readFile fileName
   return (parseExpr content)
 
-run :: String -> IO ()
-run name = do
-  let p = parseExpr name
+run :: AnnF () () -> IO ()
+run p = do
   putStrLn "----------------------------------------------"
-  putStrLn "-- Original program annotated with PP"      --
-  putStrLn "----------------------------------------------"
-  putStrLn ""
+  putStrLn "-- Original program annotated with PP       --"
   let p' = uniquifyPPoints p
   printExpr p'
+  putStrLn ""
   case analyzeExpr p' of
     Left err -> do
       putStrLn ""
       printExpr err
-    Right (t,_ ,c) -> do
+    Right (ann,an,t,s ,c) -> do
+      putStrLn "----------------------------------------------"
+      putStrLn "-- Program annotated with types             --"
+      printExpr ann
       putStrLn ""
-      putStrLn "------------------------------------------"
-      putStrLn ""
-      print t
+      printExpr an
       print c
+      print $ solveConstraints (S.toList c)
 
 printExpr doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
               >> putChar '\n'
+
+runFile file = parseFile file >>= run
+runExpr = run . parseExpr

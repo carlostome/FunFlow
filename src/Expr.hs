@@ -1,47 +1,56 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor  #-}
 {-# LANGUAGE DeriveTraversable #-}
---{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Expr where
 
 import           Data.Bifunctor.TH
 import           Text.PrettyPrint.ANSI.Leijen as PP
 
-type Pi    = Int     -- For numbering lambda's etc. that can then be tracked in the analysis
 type Name  = String  -- For identifier names
 
 -- | Expr type parametrized over program points
 --   and annotations.
-data Expr a
+data ExprF a r
   = Integer Integer
   | Bool    Bool
   | Var     Name
-  | Fun     a  Name Name (Expr a)
-  | Fn      a  Name (Expr a)
-  | App     (Expr a) (Expr a)
-  | Let     Name (Expr a) (Expr a)
-  | ITE     (Expr a) (Expr a) (Expr a)
-  | Oper    Op   (Expr a) (Expr a)
-  | Pair    a (Expr a) (Expr a)
-  | PCase   (Expr a) Name Name (Expr a)
-  | LCons   a (Expr a) (Expr a)
+  | Fun     a  Name Name r
+  | Fn      a  Name r
+  | App     r r
+  | Let     Name r r
+  | ITE     r r r
+  | Oper    Op   r r
+  | Pair    a r r
+  | PCase   r Name Name r
+  | LCons   a r r
   | LNil    a
-  | LCase   (Expr a) Name Name (Expr a) Name (Expr a)
+  | LCase   r Name Name r Name r
   deriving (Eq, Show, Functor, Foldable, Traversable)
+
+data AnnF p a = AnnF a (ExprF p (AnnF p a))
+  deriving (Eq, Show, Functor, Foldable, Traversable)
+
+ann a e = AnnF (Just a) e
+noann e = AnnF Nothing e
+
+type Expr p = AnnF p ()
 
 data Op
    = Add | Sub | Mul | Div
   deriving (Eq)
 
-bin :: Name -> Expr a -> Expr a -> Expr a
-bin op = Oper r where
-  r = case op of
-        "+" -> Add
-        "-" -> Sub
-        "*" -> Mul
-        "/" -> Div
+bin :: Name -> Expr p -> Expr p -> Expr p
+bin op a b = AnnF () (Oper r a b)
+  where
+    r = case op of
+         "+" -> Add
+         "-" -> Sub
+         "*" -> Mul
+         "/" -> Div
 
-instance (Pretty a) => Pretty (Expr a) where
+instance (Pretty a, Pretty r) => Pretty (ExprF a r) where
   pretty (Integer n) = pretty n
   pretty (Bool b)    = pretty b
   pretty (Var n)     = text n
@@ -76,6 +85,13 @@ instance (Pretty a) => Pretty (Expr a) where
          ,text "Cons" <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
          ,pretty e1, bold . text $ "or", pretty x, bold . text $ "=>", pretty e2]
 
+instance (Pretty p, Pretty a) => Pretty (AnnF a (Maybe p)) where
+  pretty (AnnF (Just a) e) = hcat [pretty e, colon, pretty a]
+  pretty (AnnF Nothing e)  = pretty e
+
+instance Pretty a => Pretty (AnnF a ()) where
+  pretty (AnnF _ e) = pretty e
+
 instance Show Op where
   show op = case op of
     Add ->  "+"
@@ -83,6 +99,10 @@ instance Show Op where
     Mul ->  "*"
     Div ->  "/"
 
-{- $(deriveBifunctor ''Expr) -}
-{- $(deriveBifoldable ''Expr) -}
-{- $(deriveBitraversable ''Expr) -}
+$(deriveBifunctor ''ExprF)
+$(deriveBifoldable ''ExprF)
+$(deriveBitraversable ''ExprF)
+
+$(deriveBifunctor ''AnnF)
+$(deriveBifoldable ''AnnF)
+$(deriveBitraversable ''AnnF)

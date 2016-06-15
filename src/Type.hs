@@ -7,31 +7,31 @@
 module Type
   ( Ty (..)
   , TyScheme(..)
-  , Subst
-  , empty
-  , o
+  , Subst(..)
+  , (~>)
   , Substitutable(..)
   , Constraint(..)
   , Ann(..)
   , TyErr (..)
+  , (>:)
   )
   where
 
 import           Bound.Class
 import           Bound.Scope.Simple
-import           Control.Monad      (ap)
+import           Control.Monad                (ap)
 import           Data.Bifunctor
 import           Data.Bifunctor.TH
 import           Data.Foldable
-import qualified Data.List          as L
-import           Data.Map           (Map)
-import qualified Data.Map           as Map
+import qualified Data.List                    as L
+import           Data.Map                     (Map)
+import qualified Data.Map                     as Map
 import           Data.Monoid
-import           Data.Set           (Set)
-import qualified Data.Set           as Set
+import           Data.Set                     (Set)
+import qualified Data.Set                     as Set
 import           Data.Void
 import           Prelude.Extras
-import Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
+import           Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 
 -- | Ground type
 -- Parametrized over type variables and annotation
@@ -51,19 +51,15 @@ data TyScheme b a = Base (Ty b a)
                   deriving (Functor, Foldable, Traversable)
 
 -- | Simple annotations
-data Ann a b = AnnV a
-             | PP b
-             | Union (Ann a b) (Ann a b)
-             | Empty
+data Ann b a = AnnV a
+             | AnnS (Set b)
              deriving (Functor, Foldable, Traversable, Eq, Ord)
 
-instance Monoid (Ann a b) where
-  mempty  = Empty
-  mappend = Union
+data Constraint b a = C a (Ann b a)
+                    deriving (Functor, Foldable, Eq, Ord)
 
-data Constraint b a = EqC a (Ann b a)
-                    deriving (Functor, Foldable, Traversable, Eq, Ord)
-
+(>:) :: a -> b -> Set (Constraint b a)
+a >: b = Set.singleton $ C a (AnnS (Set.singleton b))
 
 data TyErr b a = TyErrOccursCheck a (Ty b a)
                | TyErrUnify       (Ty b a) (Ty b a)
@@ -71,27 +67,29 @@ data TyErr b a = TyErrOccursCheck a (Ty b a)
                deriving Show
 
 -- | Substitution
--- We maintain the invariant that in a concrete
--- substitution, all annotation variables have
--- been already substituted.
-type Subst b a = Map a (Ty b a)
+newtype Subst b a = Subst (Map a (Ty b a))
 
--- | Empty substitution
-empty = Map.empty
+(~>) :: Ord a => a -> Ty b a -> Subst b a
+v ~> t = Subst $ Map.singleton v t
 
 -- | Compose two substitutions
-o :: (Ord a, Ord b) => Subst b a -> Subst b a -> Subst b a
-o s1 s2 = Map.map (apply s1) s2 `Map.union` s1
+compose :: Ord a => Subst b a -> Subst b a -> Subst b a
+compose s1@(Subst s) (Subst s2) = Subst $ Map.map (apply s1) s2 `Map.union` s
+
+-- | Substitution are Monoids
+instance Ord a => Monoid (Subst b a) where
+  mappend = compose
+  mempty  = Subst Map.empty
 
 class Substitutable m where
-  apply :: (Ord a, Ord b) => Subst b a -> m b a -> m b a
+  apply :: Ord a => Subst b a -> m b a -> m b a
 
 instance Substitutable Ty where
-  apply s t = t >>= (\v -> Map.findWithDefault (TyV v) v s)
+  apply (Subst s) t = t >>= (\v -> Map.findWithDefault (TyV v) v s)
 
 instance Substitutable TyScheme where
   apply s (Base t)   = Base $ apply s t
-  apply s (Forall e) =
+  apply (Subst s) (Forall e) =
     Forall (e >>>= (\v -> Map.findWithDefault (TyV v) v s))
 
 --------------------------------------------------------------------------------
@@ -107,11 +105,13 @@ instance Monad (Ty b) where
   (TyV a) >>= f = f a
   B   >>= _ = B
   I   >>= _ = I
-  (Arrow t1 ann t2) >>= f = Arrow (t1 >>= f) ann (t2 >>= f)
+  (Arrow t1 a t2) >>= f = Arrow (t1 >>= f) a (t2 >>= f)
+  (Prod  t1 a t2) >>= f = Prod  (t1 >>= f) a (t2 >>= f)
+  (List a t1) >>= f = List a (t1 >>= f)
 
 instance (Show b, Show a) => Show (Ty b a) where
-  show B  = "Bool"
-  show I  = "Integer"
+  show B  = "bool"
+  show I  = "int"
   show (TyV a) = show a
   show (Arrow t1 ann t2) = "(" ++ show t1 ++ " -" ++ show ann
                            ++ "-> " ++ show t2 ++ ")"
@@ -126,19 +126,17 @@ instance (Show a, Show b) => Show (TyScheme b a) where
 
 instance (Show a, Show b) => Show (Ann b a) where
   show (AnnV a) = show a
-  show (PP p)   = "{" ++ show p ++ "}"
-  show (Union a b) = show a ++ " U " ++ show b
-  show Empty       = "o"
+  show (AnnS p) = "{" ++ show p ++ "}"
 
 instance (Show a, Show b) => Show (Constraint b a) where
-  show (EqC a ann) = show a ++ "=" ++ show ann
+  show (C a ann) = show a ++ ">" ++ show ann
 
 instance (Pretty a, Pretty b) => Pretty (Ty b a) where
-  pretty B  = text "Bool"
-  pretty I  = text "Integer"
+  pretty B  = text "bool"
+  pretty I  = text "int"
   pretty (TyV a) = pretty a
   pretty (Arrow t1 ann t2) =
-    parens (hsep [pretty t1, pretty ann PP.<> text "->"
+    parens (hsep [pretty t1, text "-" PP.<> pretty ann PP.<> text "->"
                  , pretty t2])
   pretty (Prod t1 ann t2)  =
     hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
@@ -156,10 +154,9 @@ instance (Pretty a, Pretty b) => Pretty (TyErr b a) where
         TyErrUnify t k -> hsep  [text "Cannot", underline $ text "unify", bold $ pretty t, text "with", bold $ pretty k]
         TyErrInternal s -> hsep [text "Internal error:",  text s])
 
+instance (Pretty a) => Pretty (Set a) where
+  pretty = braces . hcat . L.intersperse (char ',') . map pretty . Set.toList
+
 $(deriveBifunctor ''Ty)
 $(deriveBifoldable ''Ty)
 $(deriveBitraversable ''Ty)
-
-$(deriveBifunctor ''Ann)
-$(deriveBifoldable ''Ann)
-$(deriveBitraversable ''Ann)
