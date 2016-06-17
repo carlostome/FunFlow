@@ -11,6 +11,7 @@ import           Control.Monad.Gen
 import           Control.Monad.State
 import           Control.Monad.Trans.Maybe
 import           Data.Bifunctor            (first)
+import           Data.Bifoldable           (bifoldMap)
 import           Data.Bitraversable        (bimapM, bimapAccumL)
 import           Data.Foldable
 import           Data.Functor.Identity
@@ -41,6 +42,9 @@ analyzeExpr e = do
          , an
          , t, s, c)
 
+runInfer :: InferM a -> Either (TyErr AnnVar TyVar) a
+runInfer = runGenFrom '`' . runGenT
+                 . runExceptT
 type Pi     = Char -- Program points (we use uppercase letters begining in P)
 type TyVar  = Char -- Type variables
 type AnnVar = Int  -- Annotation variables
@@ -48,8 +52,6 @@ type AnnVar = Int  -- Annotation variables
 -- | Make program points unique.
 uniquifyPPoints :: AnnF () a -> AnnF Pi a
 uniquifyPPoints = snd . bimapAccumL (\acc _ -> (succ acc, acc)) (\a d -> (a,d)) 'P'
-
--- mapAccumL :: Traversable t => (a -> b -> (a, c)) -> a -> t b -> (a, t c) 
 
 type Env b a = Map Name (TyScheme b a)
 
@@ -84,10 +86,9 @@ algorithmW env (AnnF _ expr) =
     Var n     ->
       case Map.lookup n env of
         Just ty -> do
-          i   <- lift . lift $ instantiate ty
-          b_0 <- freshAnnVar
-          let (t, c0) = subeffecting b_0 i
-          return (ann t (Var n) ,  t, mempty, c0)
+          i      <- lift . lift $ instantiate ty
+          (c, t) <- subeffect i i
+          return (ann t (Var n) ,  t, mempty, c)
         Nothing ->
           throwE (TyErrInternal ("Variable lookup fail: " ++ show n))
 
@@ -95,19 +96,19 @@ algorithmW env (AnnF _ expr) =
       a_0 <- freshTyVar
       a_1 <- freshTyVar
       b_0 <- freshAnnVar
-      (e',t1,phi1,c1) <- algorithmW (extend f (Base (Arrow a_0 b_0 a_1)) (extend x (Base a_0) env)) e
-      phi2    <- unify t1 (apply phi1 a_1)
-      let t = Arrow (apply (phi2 <> phi1) a_0) b_0 (apply phi2 a_1)
+      (e',t1,phi1,c1) <- algorithmW (extend f (Base (TyArrow a_0 b_0 a_1)) (extend x (Base a_0) env)) e
+      (phi2, c2)    <- unify t1 (apply phi1 a_1)
+      let t = TyArrow (apply (phi2 <> phi1) a_0) b_0 (apply phi2 a_1)
       return ( noann (Fun pi f x e')
              , t
              , phi2 <> phi1
-             , (b_0 >: pi) <> c1)
+             , (b_0 >: pi) <> c1 <> c2)
 
     Fn  pi f e -> do
       a_0 <- freshTyVar
       (e', t1, phi, c0)  <- algorithmW (extend f (Base a_0) env)  e
       b_0 <- freshAnnVar
-      let t = Arrow (apply phi a_0) b_0 t1
+      let t = TyArrow (apply phi a_0) b_0 t1
       return ( noann (Fn pi f e')
              , t
              , phi
@@ -120,14 +121,14 @@ algorithmW env (AnnF _ expr) =
       a_0 <- freshTyVar
       b_0 <- freshAnnVar
 
-      phi3 <- unify (apply phi2 t1) (Arrow t2 b_0 a_0)
+      (phi3, c3) <- unify (apply phi2 t1) (TyArrow t2 b_0 a_0)
 
       let    t      = apply (phi3 <> phi2) a_0
 
       return ( noann (App e1' e2')
              , t
              , phi3 <> phi2 <> phi1
-             , c1 <> c2 <> t2 `flows` apply (phi3 <> phi2) t1)
+             , c1 <> c2 <> c3 <> t2 `flows` apply (phi3 <> phi2) t1)
 
     Let     n e1 e2  -> do
       (e1', t1, phi1, c1) <- algorithmW env e1
@@ -143,32 +144,32 @@ algorithmW env (AnnF _ expr) =
       (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
       (e3', t3, phi3, c3) <- algorithmW (Map.map (apply (phi2 <> phi1)) env) e3
 
-      phi4 <-  unify (apply (phi3 <> phi2) t1) B
-      phi5 <-  unify (apply (phi4 <> phi3) t2) (apply phi4 t3)
+      (phi4, c4) <-  unify (apply (phi3 <> phi2) t1) B
+      (phi5, c5) <-  unify (apply (phi4 <> phi3) t2) (apply phi4 t3)
 
-      b_0 <- freshAnnVar
+      (c, t)  <- subeffect (apply (phi5 <> phi4 <> phi3) t2) (apply (phi5 <> phi4 ) t3)
 
       return ( noann (ITE e1' e2' e3')
-             , rep b_0 (apply (phi4 <> phi3) t2)
+             , t
              , phi5 <> phi4 <> phi3 <> phi2 <> phi1
-             , c1 <> c2 <> c3 <> sub b_0 t2 <> sub b_0 t3)
+             , c1 <> c2 <> c3 <> c4 <> c5 <> c)
 
     Oper    op e1 e2 -> do
       (e1', t1, phi1, c1) <- algorithmW env e1
       (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
-      phi3 <-  unify (apply phi2 t1) (tOp op)
-      phi4 <-  unify (apply phi3 t2) (tOp op)
+      (phi3, c3) <-  unify (apply phi2 t1) (tOp op)
+      (phi4, c4) <-  unify (apply phi3 t2) (tOp op)
       return ( noann (Oper op e1' e2')
              , tOp op
              , phi4 <> phi3 <> phi2 <> phi1
-             , c1 <> c2)
+             , c1 <> c2 <> c3 <> c4)
 
-    -- Pairs
+    -- TyPairs
     Pair pi e1 e2 -> do
       (e1', t1, phi1, c1) <- algorithmW env e1
       (e2', t2, phi2, c2) <- algorithmW (Map.map (apply phi1) env) e2
       b_0 <- freshAnnVar
-      let t = Prod (apply phi2 t1) b_0 t2
+      let t = TyPair (apply phi2 t1) b_0 t2
       return ( noann (Pair pi e1' e2')
              , t
              , phi2 <> phi1
@@ -179,79 +180,110 @@ algorithmW env (AnnF _ expr) =
       a_0 <- freshTyVar
       a_1 <- freshTyVar
       b_0 <- freshAnnVar
-      phi1 <- unify t0 (Prod a_0 b_0 a_1)
+      (phi1, c1) <- unify t0 (TyPair a_0 b_0 a_1)
       (e2', t2, phi2, c2) <- algorithmW (extend x2 (apply phi1 (Base a_1))
                           $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply (phi1 <> phi0)) env) e2
-      return ( ann t2 (PCase e0' x1 x2 e2')
+
+      return ( noann (PCase e0' x1 x2 e2')
              , t2
              , phi2 <> phi1
-             , c0 <> c2)
+             , c0 <> c1 <> c2)
 
-    {- -- Lists -}
-    {- LNil pi -> do -}
-    {-   a_0 <- freshTyVar -}
-    {-   b_0 <- freshAnnVar -}
-    {-   return (List b_0 a_0, empty, b_0 >: pi) -}
+      -- Lists
+    LNil pi -> do
+        a_0 <- freshTyVar
+        b_0 <- freshAnnVar
+        return ( noann (LNil pi)
+              , TyList b_0 a_0
+              , mempty
+              , b_0 >: pi)
 
     {- LCons pi e0 e1 -> do -}
-    {-   (t0, phi0, c0) <- algorithmW env e0 -}
-    {-   (t1, phi1, c1) <- algorithmW (Map.map (apply phi0) env) e1 -}
-    {-   b_0 <- freshAnnVar -}
-    {-   phi2           <- unify t1 (List b_0 (apply phi1 t0)) -}
-    {-   b_1 <- freshAnnVar -}
-    {-   return ( List b_1 (apply (phi2 `o` phi1) t0) -}
-    {-          , phi2 `o` phi1 `o` phi0 -}
-    {-          , c0 <> c1 <> (b_1 >: pi)) -}
+    {-     (e0', t0, phi0, c0) <- algorithmW env e0 -}
+    {-     (e1', t1, phi1, c1) <- algorithmW (Map.map (apply phi0) env) e1 -}
 
+    {-     d_0 <- freshAnnVar -}
+
+    {-     (phi2, c2)     <- unify t1 (TyList d_0 (apply phi1 t0)) -}
+
+    {-     b_1 <- freshAnnVar -}
+
+    {-     return ( ann t (LCons pi e0' e1') -}
+    {-           , t -}
+    {-           , phi2 <> phi1 <> phi0 -}
+    {-           , c0 <> c1 <> (b_1 >: pi) <> sub b_1 t1) -}
+
+    {- LCase e0 x1 x2 e1 e2 -> do -}
+    {-   (e0', t0, phi0, c0) <- algorithmW env e0 -}
+    {-   a_0 <- freshTyVar -}
+    {-   d_0 <- freshAnnVar -}
+    {-   (phi1, c1) <- unify t0 (TyList d_0 a_0) -}
+
+    {-   (e1', t1, phi1, c1) <- algorithmW (extend x2 (apply phi1 (Base a_0)) -}
+    {-                        $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply (phi1 <> phi0)) env) e1 -}
+
+    {-   (e2', t2, phi2, c2) <- algorithmW (extend x2 (apply phi1 (Base a_0)) -}
+    {-                        $ extend x1 (apply phi1 (Base a_0)) $ Map.map (apply (phi1 <> phi0)) env) e1 -}
+
+    {-   return ( noann (LCase e0' x1 x2 e1' e2') -}
+    {-          , t2 -}
+    {-          , phi2 <> phi1 -}
+    {-          , c0 <> c1 <> c2) -}
 
 -- | This function implementes subeffecting to relax the requirement
 -- that two types with some kind of annotation variable point one to
 -- the other. To avoid poisoning we do not update the environment.
 -- To call this function both types must have been unified and performed
 -- substitution before.
-flows (Arrow _ b _) (Arrow (Arrow _ c _) _ _) = Set.fromList [C c (AnnV b)]
+flows (TyArrow _ b _) (TyArrow (TyArrow _ c _) _ _) = Set.fromList [C c (AnnV b)]
 flows _ _ = mempty
 
-sub b (Arrow t c s) = Set.fromList [C b (AnnV c)]
-sub _ t =  mempty
+-- | Given two equal (important) types t1 and t2, create a new type t
+-- with all fresh annotation variables and include a new constraint
+subeffect :: Ty AnnVar a
+          -> Ty AnnVar a
+          -> InferM (Set (Constraint Pi AnnVar), Ty AnnVar a)
+subeffect t1 t2 =
+  let ann1 = bifoldMap (return :: a -> [a]) (const mempty) t1
+  in (first fst . bimapAccumL
+        (\(acc,a1:as) (a2,b)
+          -> ((acc <> Set.singleton (C b (AnnV a2))
+                   <> Set.singleton (C b (AnnV a1)), as), b))
+    (,)
+    (mempty, ann1))
+     <$> bimapM (\ann -> (ann,) <$> freshAnnVar) return t2
 
-rep b (Arrow t _ s) = Arrow t b s
-rep _ t = t
 
-get (Arrow t c s) = [c]
-get t = []
-
-interest (Arrow _ _ _) = True
-interest _ = False
-subeffecting b (Arrow t a s) = (Arrow t b s, Set.fromList [C b (AnnV a)])
-subeffecting _ t = (t, mempty)
 -- | Type unification.
 -- Unification only works on types as originally defined.
 -- It does not deal in any case with annotation variables.
-unify :: (Ord a, Ord b)
-      => Ty b a
-      -> Ty b a
-      -> InferM (Subst b a)
+unify :: Ty AnnVar TyVar
+      -> Ty AnnVar TyVar
+      -> InferM (Subst AnnVar TyVar, Set (Constraint Pi AnnVar))
 unify I I   = return  mempty
 unify B B   = return  mempty
 unify (TyV f1) (TyV f2)
     | f1 == f2  = return mempty
-    | otherwise = return (f1 ~> TyV f2)
-unify (Arrow t1 a t2) (Arrow t1' a' t2') = do
-  phi0 <- unify t1 t1'
-  phi1 <- unify (apply phi0 t2) (apply phi0 t2')
-  return ( phi1 <> phi0 )
+    | otherwise = return (f1 ~> TyV f2, mempty)
+unify (TyArrow t1 a t2) (TyArrow t1' a' t2') = do
+  (phi0, c0) <- unify t1 t1'
+  (phi1, c1) <- unify (apply phi0 t2) (apply phi0 t2')
+  return ( phi1 <> phi0, c0 <> c1 )
 unify (TyV f1) t
   | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
-  | otherwise        = return (f1 ~> t)
+  | otherwise        = do
+    (c0, t) <- subeffect t t
+    return (f1 ~> t, c0)
 unify t (TyV f1)
   | occursCheck f1 t = throwE (TyErrOccursCheck f1 t)
-  | otherwise        = return (f1 ~> t)
-unify (Prod t1 _ t2) (Prod t1' _ t2') = do
-  phi0 <- unify t1 t1'
-  phi1 <- unify (apply phi0 t2) (apply phi0 t2')
-  return (phi1 <> phi0)
-unify (List _ t1) (List _ t1') = unify t1 t1'
+  | otherwise        = do
+    (c0, t) <- subeffect t t
+    return (f1 ~> t, c0)
+unify (TyPair t1 _ t2) (TyPair t1' _ t2') = do
+  (phi0, c0) <- unify t1 t1'
+  (phi1, c1) <- unify (apply phi0 t2) (apply phi0 t2')
+  return (phi1 <> phi0, c1 <> c0)
+unify (TyList _ t1) (TyList _ t1') = unify t1 t1'
 unify t k = throwE (TyErrUnify t k)
 
 -- | Occurs check

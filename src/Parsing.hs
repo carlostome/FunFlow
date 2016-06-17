@@ -52,7 +52,7 @@ pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pPCase
   pLCons   = AnnF () <$> iI (LCons ()) "Cons" "(" pExpr "," pExpr ")" Ii
   pLNil    = AnnF () (LNil ()) <$ pSymbol "Nil"
   pLCase   = AnnF () <$> iI LCase "lcase" pExpr "of" "Cons" "(" pIdent "," pIdent ")" "=>"
-               pExpr "or" pIdent "=>" pExpr Ii
+               pExpr "or" pExpr Ii
 
   -- chained expressions
   pApp = pChainl_ng ((\x y -> AnnF () (App x y)) <$ pSpaces) pAtom

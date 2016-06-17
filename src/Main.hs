@@ -30,6 +30,7 @@ run :: AnnF () () -> IO ()
 run p = do
   putStrLn "----------------------------------------------"
   putStrLn "-- Original program annotated with PP       --"
+  putStrLn ""
   let p' = uniquifyPPoints p
   printExpr p'
   putStrLn ""
@@ -37,17 +38,22 @@ run p = do
     Left err -> do
       putStrLn ""
       printExpr err
-    Right (ann,an,t,s ,c) -> do
+    Right (ann, an,t,s ,c) -> do
       putStrLn "----------------------------------------------"
-      putStrLn "-- Program annotated with types             --"
+      putStrLn "-- Program annotated with infered types     --"
+      putStrLn ""
       printExpr ann
       putStrLn ""
+      putStr ":: "
+      printExpr t
+      putStrLn ""
       printExpr an
+      putStrLn ""
       print c
-      print $ solveConstraints (S.toList c)
 
 printExpr doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
               >> putChar '\n'
 
 runFile file = parseFile file >>= run
+
 runExpr = run . parseExpr

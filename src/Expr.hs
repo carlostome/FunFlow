@@ -26,7 +26,7 @@ data ExprF a r
   | PCase   r Name Name r
   | LCons   a r r
   | LNil    a
-  | LCase   r Name Name r Name r
+  | LCase   r Name Name r r
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
 data AnnF p a = AnnF a (ExprF p (AnnF p a))
@@ -60,11 +60,11 @@ instance (Pretty a, Pretty r) => Pretty (ExprF a r) where
   pretty (Fn p x e) =
     hsep [bold (text "fn"), pretty p ,  text x, bold (text "=>"), pretty e]
   pretty (App e1 e2) =
-    hsep [pretty e1 , pretty e2]
+    parens $ hsep [pretty e1 , pretty e2]
   pretty (Let n e e2) =
     hsep [bold $ text "let", text n, bold (char '='), pretty e, bold $ text "in"]
     PP.<$>
-    pretty e2
+    (indent 2 $ pretty e2)
   pretty (ITE c e t) =
     hsep [bold $ text "if", pretty c, bold $ text "then"
          , pretty e, bold $ text "else", pretty t]
@@ -74,16 +74,17 @@ instance (Pretty a, Pretty r) => Pretty (ExprF a r) where
     hsep [bold . text $ "Pair", pretty pi
          , parens (pretty e1 <> comma <> pretty e2)]
   pretty (PCase p x1  x2 e) =
-    hsep [bold . text $ "pcase", pretty p, bold . text $ "of"
-         ,text "Pair" <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
-         ,pretty e]
+    vcat [ hsep [bold . text $ "pcase", pretty p, bold . text $ "of"]
+         , indent 2 $
+            hsep [dullgreen (text "Pair") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
+                 ,pretty e]]
   pretty (LCons pi e1 e2) =
     hsep [text "Cons", pretty pi , brackets (pretty e1 <> comma <> pretty e2)]
   pretty (LNil pi) = brackets (pretty pi)
-  pretty (LCase p x1 x2 e1 x e2) =
+  pretty (LCase p x1 x2 e1 e2) =
     hsep [bold . text $ "lcase", pretty p, bold . text $ "of"
-         ,text "Cons" <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
-         ,pretty e1, bold . text $ "or", pretty x, bold . text $ "=>", pretty e2]
+         ,dullmagenta (text "Cons") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
+         ,pretty e1, bold . text $ "or", pretty e2]
 
 instance (Pretty p, Pretty a) => Pretty (AnnF a (Maybe p)) where
   pretty (AnnF (Just a) e) = hcat [pretty e, colon, pretty a]

@@ -39,9 +39,9 @@ import           Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 data Ty b a = TyV a
             | B
             | I
-            | Arrow (Ty b a) b (Ty b a)
-            | Prod (Ty b a) b (Ty b a)
-            | List b (Ty b a)
+            | TyArrow (Ty b a) b (Ty b a)
+            | TyPair  (Ty b a) b (Ty b a)
+            | TyList b (Ty b a)
             deriving (Foldable, Functor, Traversable)
 
 -- | Type scheme.
@@ -68,6 +68,7 @@ data TyErr b a = TyErrOccursCheck a (Ty b a)
 
 -- | Substitution
 newtype Subst b a = Subst (Map a (Ty b a))
+  deriving (Show)
 
 (~>) :: Ord a => a -> Ty b a -> Subst b a
 v ~> t = Subst $ Map.singleton v t
@@ -105,18 +106,18 @@ instance Monad (Ty b) where
   (TyV a) >>= f = f a
   B   >>= _ = B
   I   >>= _ = I
-  (Arrow t1 a t2) >>= f = Arrow (t1 >>= f) a (t2 >>= f)
-  (Prod  t1 a t2) >>= f = Prod  (t1 >>= f) a (t2 >>= f)
-  (List a t1) >>= f = List a (t1 >>= f)
+  (TyArrow t1 a t2) >>= f = TyArrow (t1 >>= f) a (t2 >>= f)
+  (TyPair  t1 a t2) >>= f = TyPair  (t1 >>= f) a (t2 >>= f)
+  (TyList a t1) >>= f = TyList a (t1 >>= f)
 
 instance (Show b, Show a) => Show (Ty b a) where
   show B  = "bool"
   show I  = "int"
   show (TyV a) = show a
-  show (Arrow t1 ann t2) = "(" ++ show t1 ++ " -" ++ show ann
+  show (TyArrow t1 ann t2) = "(" ++ show t1 ++ " -" ++ show ann
                            ++ "-> " ++ show t2 ++ ")"
-  show (Prod t1 ann t2)  = show t1 ++ " x" ++ show ann ++ " " ++ show t2
-  show (List ann t) = "[" ++ show t ++ "]" ++ show ann
+  show (TyPair t1 ann t2)  = show t1 ++ " x" ++ show ann ++ " " ++ show t2
+  show (TyList ann t) = "[" ++ show t ++ "]" ++ show ann
 
 
 instance (Show a, Show b) => Show (TyScheme b a) where
@@ -135,18 +136,18 @@ instance (Pretty a, Pretty b) => Pretty (Ty b a) where
   pretty B  = text "bool"
   pretty I  = text "int"
   pretty (TyV a) = pretty a
-  pretty (Arrow t1 ann t2) =
+  pretty (TyArrow t1 ann t2) =
     parens (hsep [pretty t1, text "-" PP.<> pretty ann PP.<> text "->"
                  , pretty t2])
-  pretty (Prod t1 ann t2)  =
+  pretty (TyPair t1 ann t2)  =
     hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
-  pretty (List ann t) =
+  pretty (TyList ann t) =
     brackets (pretty t) PP.<> pretty ann
 
 instance (Pretty a, Pretty b) => Pretty (TyErr b a) where
   pretty err =
     hsep [text "There was an"
-            , (bold . red . text $ "error") PP.<> colon]
+         , (bold . red . text $ "error") PP.<> colon]
     PP.<$>
     (indent 2 $
       case err of
