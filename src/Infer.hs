@@ -2,32 +2,29 @@
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TupleSections     #-}
-module Infer
-where
+module Infer where
 
 import           Expr
 import           Type
 
-import qualified Bound.Scope.Simple         as B
-import           Control.Error.Util
+import qualified Bound.Scope.Simple           as B
 import           Control.Monad.Gen
-import           Control.Monad.State
-import qualified Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
-import           Text.PrettyPrint.ANSI.Leijen (Pretty(..))
+import           Control.Monad.Trans.Class    (lift)
 import           Control.Monad.Trans.Except
-import           Control.Monad.Trans.Maybe
-import           Data.Bifoldable            (bifoldMap, bifoldl)
-import           Data.Bifunctor             (first)
+import           Data.Bifoldable              (bifoldMap, bifoldl)
+import           Data.Bifunctor               (first)
 import           Data.Bifunctor.TH
-import           Data.Bitraversable         (bimapAccumL, bimapM)
-import           Data.Foldable
-import qualified Data.List                  as List
-import           Data.Map                   (Map)
-import qualified Data.Map                   as Map
+import           Data.Bitraversable           (bimapAccumL, bimapM)
+import           Data.Foldable                (toList)
+import qualified Data.List                    as List
+import           Data.Map                     (Map)
+import qualified Data.Map                     as Map
 import           Data.Maybe
 import           Data.Monoid
-import           Data.Set                   (Set)
-import qualified Data.Set                   as Set
+import           Data.Set                     (Set)
+import qualified Data.Set                     as Set
+import           Text.PrettyPrint.ANSI.Leijen (Pretty (..))
+import qualified Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 
 
 -- | Top level function for analyzing an Expr.
@@ -55,6 +52,7 @@ runInfer :: InferM a
 runInfer =
   runGenFrom '`' . runGenT
                  . runExceptT
+
 -- | Errors that can happen during inference.
 data TyErr b a = TyErrOccursCheck a (Ty b a)            -- ^ Occurscheck
                | TyErrUnify         (Ty b a) (Ty b a)   -- ^ Unification
@@ -197,12 +195,17 @@ algorithmW env (AnnF _ expr) =
       (e1', t1, phi1, c1) <- algorithmW env e1
       (e2', t2, phi2, c2) <- algorithmW (apply phi1 env) e2
 
-      phi3 <-  unify (apply phi2 t1) (tOp op)
-      phi4 <-  unify (apply phi3 t2) (tOp op)
+      let tOp = case op of
+                  Add -> I
+                  Sub -> I
+                  Mul -> I
+                  Div -> I
 
-      let t = tOp op
-      return ( ann t (Oper op e1' e2')
-             , t
+      phi3 <-  unify (apply phi2 t1) tOp
+      phi4 <-  unify (apply phi3 t2) tOp
+
+      return ( ann tOp (Oper op e1' e2')
+             , tOp
              , phi4 <> phi3 <> phi2 <> phi1
              , c1 <> c2)
 
@@ -324,13 +327,6 @@ unify t k = throwE (TyErrUnify t k)
 occursCheck :: Eq a => a -> Ty b a -> Bool
 occursCheck = elem
 
-tOp :: Op -> Ty b a
-tOp op =
-  case op of
-    Add -> I
-    Sub -> I
-    Mul -> I
-    Div -> I
 
 -- | Generate a constraint indicating that t1 can flow to the
 -- argument of the function type t2. It is important that both

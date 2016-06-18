@@ -41,6 +41,10 @@ pair2 =
   \let snd = fn p => pcase p of Pair(x,y) => y in \
   \ fst (pair (fn z => z + 1) 2)                   "
 
+swap0 =
+  "let swap = fn p => pcase p of Pair(x,y) => Pair(y,x) in \
+  \ swap"
+
 l0 = "Cons (Pair(fn x => 1, 2), Cons(Pair(fn x => 2, 3), Nil))"
 
 l1 = "let l = if true                                                                \
@@ -119,6 +123,23 @@ head1 =
   \ lcase list of                          \
   \    Cons(x,xs) => x                     \
   \               or def in                \
-  \ let l = (Cons (fn x => 1,Nil)) in      \
+  \ let l = (Cons (fn x => 1,Cons(fn x => x + 1, Nil))) in      \
   \  head (fn x => x) l                    "
 
+-- concat two lists
+concat0 =
+  "let concat = fun concat l1 => fn l2 =>         \
+  \ lcase l1 of                                   \
+  \    Cons(x,xs) => Cons(x, concat xs l2)        \
+  \               or l2 in                        \
+  \ concat "
+
+-- concat applied
+concat1 =
+  "let concat = fun concat l1 => fn l2 =>         \
+  \ lcase l1 of                                   \
+  \    Cons(x,xs) => Cons(x, concat xs l2)        \
+  \               or l2 in                        \
+  \let l1 = Cons(Pair(false,2), Nil) in           \
+  \let l2 = Cons(Pair(true,4), Nil)  in           \
+  \ concat l1 l2"

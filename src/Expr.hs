@@ -10,6 +10,9 @@ import           Text.PrettyPrint.ANSI.Leijen as PP
 
 type Name  = String  -- For identifier names
 
+-- | Usefull synonym
+type Expr p a = AnnF p a
+
 -- | Expr type parametrized over program points
 -- and recursive construction.
 data ExprF a r
@@ -33,13 +36,13 @@ data ExprF a r
 data AnnF p a = AnnF a (ExprF p (AnnF p a))
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
+-- | Smart constructor
 ann = AnnF
 
+-- | Usefull for getting top annotation
 getann :: AnnF p a -> a
 getann (AnnF a _) = a
 
--- | Usefull synonym
-type Expr p a = AnnF p a
 
 -- | Allowed binary operations
 data Op
@@ -56,7 +59,7 @@ bin op a b = AnnF () (Oper r a b)
          "/" -> Div
 
 --------------------------------------------------------------------------------
--- Various Show and Pretty instances
+-- Various Show and Pretty instances                                          --
 
 instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
   pretty (Integer n) = pretty n

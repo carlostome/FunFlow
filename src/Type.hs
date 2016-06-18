@@ -4,32 +4,18 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
-module Type
-  ( Ty (..)
-  , TyScheme(..)
-  , Subst(..)
-  , (~>)
-  , Substitutable(..)
-  , Constraint(..)
-  , Ann(..)
-  , (>:)
-  )
-  where
+module Type where
 
 import           Bound.Class
 import           Bound.Scope.Simple
 import           Control.Monad                (ap)
-import           Data.Bifunctor
 import           Data.Bifunctor.TH
-import           Data.Foldable
 import qualified Data.List                    as L
 import           Data.Map                     (Map)
 import qualified Data.Map                     as Map
 import           Data.Monoid
 import           Data.Set                     (Set)
 import qualified Data.Set                     as Set
-import           Data.Void
-import           Prelude.Extras
 import           Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 
 -- | Ground types.
