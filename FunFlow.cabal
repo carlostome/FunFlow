@@ -1,10 +1,7 @@
 name          : FunFlow
 version       : 0.0.0.1
 synopsis      : Control-flow analysis of a simple functional programming language.
--- homepage      : Based on https://github.com/wickedcodeninja/FunFlow
 license       : MIT
--- author        : Pepijn Kokke, Wout Elsinghorst, modified by Jurriaan Hage
--- copyright     : (c) 2013 Pepijn Kokke & Pepijn Kokke, (c) 2014 Wout Elsinghorst
 category      : Language
 build-type    : Simple
 cabal-version : >= 1.8
@@ -15,7 +12,9 @@ library
                  Type,
                  Parsing,
                  Examples
-  exposed-modules : Main
+
+  exposed-modules : FunFlow
+
   build-depends   : base,
                     uu-parsinglib,
                     monad-supply,
@@ -32,3 +31,8 @@ library
 
   hs-source-dirs  : src
 
+executable funflow
+  main-is: Main.hs
+  hs-source-dirs: exec
+  build-depends: base,
+                 FunFlow

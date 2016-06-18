@@ -1,7 +1,5 @@
-module Main (
+module FunFlow (
   analyzeExpr,
-  parseExpr,
-  parseFile,
   runFile,
   runExpr
   ) where
@@ -9,20 +7,20 @@ module Main (
 import           Expr
 import           Infer
 import           Parsing
-import Type
+import           Type
 
 import           Data.Map                     (Map)
 import           Data.Set                     (Set)
+import           Data.Set                     as S
+import           System.IO                    (stdout)
 import           Text.PrettyPrint.ANSI.Leijen
-import           System.IO (stdout)
-import Data.Set as S
 
--- |Parse and label program
-parseFile :: String -> IO (AnnF () ())
-parseFile programName = do
-  let fileName = programName
-  content <- readFile fileName
-  return (parseExpr content)
+
+-- | Run the analysis on a file
+runFile file = parseFile file >>= run
+
+-- | Run the analysis on a string
+runExpr      = run . parseExpr
 
 run :: AnnF () () -> IO ()
 run p = do
@@ -49,6 +47,9 @@ run p = do
 printDoc doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
               >> putChar '\n'
 
-runFile file = parseFile file >>= run
-
-runExpr = run . parseExpr
+-- |Parse and label program
+parseFile :: String -> IO (AnnF () ())
+parseFile programName = do
+  let fileName = programName
+  content <- readFile fileName
+  return (parseExpr content)

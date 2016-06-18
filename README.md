@@ -23,17 +23,28 @@ cabal install stack
 git clone https://github.com/carlostome/FunFlow.git
 ```
 
-4. cd into the project and build the project with `stack build`.
+4. Change directory into the project and build the project with: .
+
+```bash
+stack build
+```
+
+5. To install it just type:
+
+```bash
+stack install
+```
+this will copy it to stack binaries folder.
 
 ## Usage
 
 ### As a library
 
 The easiest way to play with this library is to use it in a live ghci session.
-In order to do so, just type `stack ghci` in the project folder. The examples
+In order to do so, just type `stack repl` in the project folder. The examples
 are contained in the src/Examples.hs file
 
 
 ### As an executable
 
-Once installed, run FunFlow FILE. File examples can be found under examples/.
+Once installed, run funflow FILE. File examples can be found under examples/.

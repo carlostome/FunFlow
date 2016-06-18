@@ -1,7 +1,5 @@
 module Examples where
 
-import Main
-
 p0 = "Pair(Pair(fn x => x, Cons(1,Nil)), true)"
 
 -- Pair projections
@@ -51,7 +49,6 @@ l1 = "let l = if true                                                           
      \   then Cons(Pair(fn x => x,Pair(1,2)), Cons(Pair(fn z => z, Pair(3,4)),Nil))  \
      \   else Nil in                                                                 \
      \ (fn x => x) l                                                                 "
-
 
 -- traverse a list and do nothing
 trav0 =
