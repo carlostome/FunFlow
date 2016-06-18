@@ -1,9 +1,7 @@
 module Main (
   analyzeExpr,
   parseExpr,
-  printExpr,
   parseFile,
-  run,
   runFile,
   runExpr
   ) where
@@ -29,29 +27,26 @@ parseFile programName = do
 run :: AnnF () () -> IO ()
 run p = do
   putStrLn "----------------------------------------------"
-  putStrLn "-- Original program annotated with PP       --"
+  putStrLn "-- Original program annotated with PP"
   putStrLn ""
   let p' = uniquifyPPoints p
-  printExpr p'
+  printDoc p'
   putStrLn ""
   case analyzeExpr p' of
     Left err -> do
       putStrLn ""
-      printExpr err
-    Right (ann, an,t,s ,c) -> do
+      printDoc err
+    Right (e_pp, t_pp) -> do
       putStrLn "----------------------------------------------"
-      putStrLn "-- Program annotated with infered types     --"
+      putStrLn "-- Program annotated with CFA analysis"
       putStrLn ""
-      printExpr ann
+      printDoc e_pp
       putStrLn ""
       putStr ":: "
-      printExpr t
+      printDoc t_pp
       putStrLn ""
-      printExpr an
-      putStrLn ""
-      print c
 
-printExpr doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
+printDoc doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
               >> putChar '\n'
 
 runFile file = parseFile file >>= run

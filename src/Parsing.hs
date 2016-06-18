@@ -21,8 +21,8 @@ parseExpr = runParser "stdin" pExpr
 
 -- * Parsing the FUN language
 pExpr :: Parser (AnnF () ())
-pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pPCase
-        <|> pLCons <|> pLNil <|> pLCase) <<|> pBin
+pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pLCons <|> pPCase
+        <|> pLCase) <<|> pBin
   where
 
   -- literal expressions
@@ -30,6 +30,7 @@ pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pPCase
   pLit = (AnnF () . Integer) <$> pInteger
      <|> (AnnF () . Bool) True  <$ pSymbol "true"
      <|> (AnnF () . Bool) False <$ pSymbol "false"
+     <|> AnnF () (LNil ()) <$ pSymbol "Nil"
 
   -- atomic expressions
   pAtom = pLit
@@ -48,9 +49,8 @@ pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pPCase
   pPCase  = AnnF () <$> iI PCase "pcase" pExpr "of" "Pair" "(" pIdent "," pIdent ")" "=>"
                pExpr Ii
 
-  pLCons, pLNil, pLCase :: Parser (AnnF () ())
+  pLCons, pLCase :: Parser (AnnF () ())
   pLCons   = AnnF () <$> iI (LCons ()) "Cons" "(" pExpr "," pExpr ")" Ii
-  pLNil    = AnnF () (LNil ()) <$ pSymbol "Nil"
   pLCase   = AnnF () <$> iI LCase "lcase" pExpr "of" "Cons" "(" pIdent "," pIdent ")" "=>"
                pExpr "or" pExpr Ii
 

@@ -33,7 +33,7 @@ import           Data.Void
 import           Prelude.Extras
 import           Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
 
--- | Ground type
+-- | Ground types.
 -- Parametrized over type variables and annotation
 -- variables.
 data Ty b a = TyV a
@@ -43,6 +43,19 @@ data Ty b a = TyV a
             | TyPair  (Ty b a) b (Ty b a)
             | TyList b (Ty b a)
             deriving (Foldable, Functor, Traversable)
+
+instance Applicative (Ty b) where
+  pure = return
+  (<*>) = ap
+
+instance Monad (Ty b) where
+  return = TyV
+  (TyV a) >>= f = f a
+  B   >>= _ = B
+  I   >>= _ = I
+  (TyArrow t1 a t2) >>= f = TyArrow (t1 >>= f) a (t2 >>= f)
+  (TyPair  t1 a t2) >>= f = TyPair  (t1 >>= f) a (t2 >>= f)
+  (TyList a t1) >>= f = TyList a (t1 >>= f)
 
 -- | Type scheme.
 --   All bound variables appear only at one top-level forall.
@@ -55,12 +68,14 @@ data Ann b a = AnnV a
              | AnnS (Set b)
              deriving (Functor, Foldable, Traversable, Eq, Ord)
 
+-- | A constraint
 data Constraint b a = C a (Ann b a)
                     deriving (Functor, Foldable, Eq, Ord)
 
 (>:) :: a -> b -> Set (Constraint b a)
 a >: b = Set.singleton $ C a (AnnS (Set.singleton b))
 
+-- | Errors that can happen during inference.
 data TyErr b a = TyErrOccursCheck a (Ty b a)
                | TyErrUnify       (Ty b a) (Ty b a)
                | TyErrInternal String
@@ -82,6 +97,8 @@ instance Ord a => Monoid (Subst b a) where
   mappend = compose
   mempty  = Subst Map.empty
 
+-- | A class for types where we can apply
+-- substitution.
 class Substitutable m where
   apply :: Ord a => Subst b a -> m b a -> m b a
 
@@ -94,21 +111,8 @@ instance Substitutable TyScheme where
     Forall (e >>>= (\v -> Map.findWithDefault (TyV v) v s))
 
 --------------------------------------------------------------------------------
--- Various instances
+-- Various Show and Pretty instances
 --------------------------------------------------------------------------------
-
-instance Applicative (Ty b) where
-  pure = return
-  (<*>) = ap
-
-instance Monad (Ty b) where
-  return = TyV
-  (TyV a) >>= f = f a
-  B   >>= _ = B
-  I   >>= _ = I
-  (TyArrow t1 a t2) >>= f = TyArrow (t1 >>= f) a (t2 >>= f)
-  (TyPair  t1 a t2) >>= f = TyPair  (t1 >>= f) a (t2 >>= f)
-  (TyList a t1) >>= f = TyList a (t1 >>= f)
 
 instance (Show b, Show a) => Show (Ty b a) where
   show B  = "bool"
@@ -140,7 +144,7 @@ instance (Pretty a, Pretty b) => Pretty (Ty b a) where
     parens (hsep [pretty t1, text "-" PP.<> pretty ann PP.<> text "->"
                  , pretty t2])
   pretty (TyPair t1 ann t2)  =
-    hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
+    parens $ hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
   pretty (TyList ann t) =
     brackets (pretty t) PP.<> pretty ann
 

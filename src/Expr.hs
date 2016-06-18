@@ -11,7 +11,7 @@ import           Text.PrettyPrint.ANSI.Leijen as PP
 type Name  = String  -- For identifier names
 
 -- | Expr type parametrized over program points
---   and annotations.
+-- and recursive construction.
 data ExprF a r
   = Integer Integer
   | Bool    Bool
@@ -32,8 +32,10 @@ data ExprF a r
 data AnnF p a = AnnF a (ExprF p (AnnF p a))
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
-ann a e = AnnF (Just a) e
-noann e = AnnF Nothing e
+ann = AnnF
+
+getann :: AnnF p a -> a
+getann (AnnF a _) = a
 
 type Expr p = AnnF p ()
 
@@ -50,48 +52,46 @@ bin op a b = AnnF () (Oper r a b)
          "*" -> Mul
          "/" -> Div
 
-instance (Pretty a, Pretty r) => Pretty (ExprF a r) where
+instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
   pretty (Integer n) = pretty n
   pretty (Bool b)    = pretty b
   pretty (Var n)     = text n
   pretty (Fun p f x e) =
-    parens $ hsep [bold (text "fun"), pretty p, text f, text x
+    parens $ hsep [dullblue (bold (text "fun")), pretty p, text f, text x
                   ,bold (text "=>"), pretty e]
   pretty (Fn p x e) =
-    hsep [bold (text "fn"), pretty p ,  text x, bold (text "=>"), pretty e]
+    hsep [dullblue (bold (text "fn")), pretty p ,  text x, bold (text "=>"), pretty e]
   pretty (App e1 e2) =
     parens $ hsep [pretty e1 , pretty e2]
   pretty (Let n e e2) =
-    hsep [bold $ text "let", text n, bold (char '='), pretty e, bold $ text "in"]
+    hsep [bold $ text "let", text n, bold (char '='), pretty e, text ":", pretty (getann e), bold $ text "in"]
     PP.<$>
-    (indent 2 $ pretty e2)
+    pretty e2
   pretty (ITE c e t) =
     hsep [bold $ text "if", pretty c, bold $ text "then"
          , pretty e, bold $ text "else", pretty t]
   pretty (Oper op e e2) =
     parens $ hsep [pretty e, text (show op), pretty e2]
   pretty (Pair pi e1 e2) =
-    hsep [bold . text $ "Pair", pretty pi
+    hsep [dullgreen . bold . text $ "Pair", pretty pi
          , parens (pretty e1 <> comma <> pretty e2)]
   pretty (PCase p x1  x2 e) =
     vcat [ hsep [bold . text $ "pcase", pretty p, bold . text $ "of"]
          , indent 2 $
-            hsep [dullgreen (text "Pair") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
+            hsep [bold (text "Pair") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
                  ,pretty e]]
   pretty (LCons pi e1 e2) =
-    hsep [text "Cons", pretty pi , brackets (pretty e1 <> comma <> pretty e2)]
-  pretty (LNil pi) = brackets (pretty pi)
+    hsep [dullmagenta . bold . text $ "Cons", pretty pi , parens (pretty e1 <> comma <> pretty e2)]
+  pretty (LNil pi) = (dullmagenta . bold . text) "Nil" <+> pretty pi
   pretty (LCase p x1 x2 e1 e2) =
-    hsep [bold . text $ "lcase", pretty p, bold . text $ "of"
-         ,dullmagenta (text "Cons") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
-         ,pretty e1, bold . text $ "or", pretty e2]
+    vcat [ hsep [bold . text $ "lcase", pretty p, bold . text $ "of"]
+         , indent 2 $
+           vcat [ hsep [bold (text "Cons") <> parens (text x1 <> comma <> text x2), bold . text $ "=>"
+                       ,pretty e1]
+                , hsep [bold . text $ "or", pretty e2]]]
 
-instance (Pretty p, Pretty a) => Pretty (AnnF a (Maybe p)) where
-  pretty (AnnF (Just a) e) = hcat [pretty e, colon, pretty a]
-  pretty (AnnF Nothing e)  = pretty e
-
-instance Pretty a => Pretty (AnnF a ()) where
-  pretty (AnnF _ e) = pretty e
+instance (Pretty p, Pretty a) => Pretty (AnnF p a) where
+  pretty (AnnF _ e)   = pretty e
 
 instance Show Op where
   show op = case op of
