@@ -11,7 +11,7 @@ import           Control.Monad.Gen
 import           Control.Monad.State
 import           Control.Monad.Trans.Except
 import           Control.Monad.Trans.Maybe
-import           Data.Bifoldable            (bifoldMap)
+import           Data.Bifoldable            (bifoldMap, bifoldl)
 import           Data.Bifunctor             (first)
 import           Data.Bitraversable         (bimapAccumL, bimapM)
 import           Data.Foldable
@@ -293,15 +293,19 @@ tOp op =
     Div -> I
 
 -- | Generate a constraint indicating that t1 can flow to the
--- argument of the function type t2.
-flows :: (Ord c, Ord b)
+-- argument of the function type t2. It is important that both
+-- types are equal before proceding.
+flows :: (Ord b, Ord c)
       => Ty b a
       -> Ty b a
       -> Set (Constraint c b)
-flows (TyArrow _ b _) (TyArrow (TyArrow _ c _) _ _) = Set.fromList [C c (AnnV b)]
-flows (TyPair _ b _)  (TyArrow (TyPair  _ c _) _ _) = Set.fromList [C c (AnnV b)]
-flows (TyList b _)    (TyArrow (TyList  c _) _ _)   = Set.fromList [C c (AnnV b)]
-flows _ _ = mempty
+flows t1 (TyArrow t _ _) =
+  let ann1 = bifoldMap (return :: a -> [a]) (const mempty) t1
+  in fst $ bifoldl
+        (\(acc,a1:as) a2
+          -> (acc <> Set.singleton (C a2 (AnnV a1)), as))
+        const
+        (mempty, ann1) t
 
 -- | Given two equal (important) types t1 and t2, create a new type t
 -- with all fresh annotation variables and return also the constraints

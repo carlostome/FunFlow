@@ -2,28 +2,51 @@ module Examples where
 
 import Main
 
---------------------------------------------------------------------------------
--- Pair examples                                                              --
-
 p0 = "Pair(Pair(fn x => x, Cons(1,Nil)), true)"
 
-pFst =
-  parseExpr "fn p => pcase p of Pair(x,y) => x"
+-- Pair projections
+proj0 =
+  "let fst = fn p => pcase p of Pair(x,y) => x in \
+  \let snd = fn p => pcase p of Pair(x,y) => y in \
+  \ fst                                           "
 
-pSnd =
-  parseExpr "fn p => pcase p of Pair(x,y) => y"
+-- proj applied
+proj1 =
+  "let fst = fn p => pcase p of Pair(x,y) => x in \
+  \let snd = fn p => pcase p of Pair(x,y) => y in \
+  \let p = Pair(fn x => x, Cons(1,Nil)) in        \
+  \ fst p                                         "
 
-pInt =
-  parseExpr "Pair (1,2)"
+-- proj applied
+proj2 =
+  "let fst = fn p => pcase p of Pair(x,y) => x in \
+  \let snd = fn p => pcase p of Pair(x,y) => y in \
+  \let p = Pair(fn x => x, Cons(1,Nil)) in        \
+  \ snd p                                         "
 
-pFun =
-  parseExpr "Pair (fn x => x, fn x => fn y => x)"
+-- create a pair
+pair0 =
+  "let pair = fn x =>  fn y => Pair(x,y) in  \
+  \ pair                                     "
+
+pair1 =
+  "let pair = fn x =>  fn y => Pair(x,y) in                          \
+  \let p = pair (Cons(fn x => x + 1, Cons(fn z => z * 2, Nil))) 1 in \
+  \ pcase p of Pair(x,y) => x                                        "
+
+-- create and destruct a pair of pairs
+pair2 =
+  "let pair = fn x =>  fn y => Pair(x,y) in       \
+  \let fst = fn p => pcase p of Pair(x,y) => x in \
+  \let snd = fn p => pcase p of Pair(x,y) => y in \
+  \ fst (pair (fn z => z + 1) 2)                   "
 
 l0 = "Cons (Pair(fn x => 1, 2), Cons(Pair(fn x => 2, 3), Nil))"
 
-l1 = "let l = if true then Cons(Pair(fn x => x,Pair(1,2)), Cons(Pair(fn z => z, Pair(3,4)),Nil))\
-     \        else Nil \
-     \ in (fn x => x) l"
+l1 = "let l = if true                                                                \
+     \   then Cons(Pair(fn x => x,Pair(1,2)), Cons(Pair(fn z => z, Pair(3,4)),Nil))  \
+     \   else Nil in                                                                 \
+     \ (fn x => x) l                                                                 "
 
 
 -- traverse a list and do nothing
