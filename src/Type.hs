@@ -12,7 +12,6 @@ module Type
   , Substitutable(..)
   , Constraint(..)
   , Ann(..)
-  , TyErr (..)
   , (>:)
   )
   where
@@ -74,12 +73,6 @@ data Constraint b a = C a (Ann b a)
 
 (>:) :: a -> b -> Set (Constraint b a)
 a >: b = Set.singleton $ C a (AnnS (Set.singleton b))
-
--- | Errors that can happen during inference.
-data TyErr b a = TyErrOccursCheck a (Ty b a)
-               | TyErrUnify       (Ty b a) (Ty b a)
-               | TyErrInternal String
-               deriving Show
 
 -- | Substitution
 newtype Subst b a = Subst (Map a (Ty b a))
@@ -147,17 +140,6 @@ instance (Pretty a, Pretty b) => Pretty (Ty b a) where
     parens $ hsep [pretty t1, char 'x' PP.<> pretty ann, pretty t2]
   pretty (TyList ann t) =
     brackets (pretty t) PP.<> pretty ann
-
-instance (Pretty a, Pretty b) => Pretty (TyErr b a) where
-  pretty err =
-    hsep [text "There was an"
-         , (bold . red . text $ "error") PP.<> colon]
-    PP.<$>
-    (indent 2 $
-      case err of
-        TyErrOccursCheck v t -> hsep [text "Occurs check failed:", pretty v, pretty t]
-        TyErrUnify t k -> hsep  [text "Cannot", underline $ text "unify", bold $ pretty t, text "with", bold $ pretty k]
-        TyErrInternal s -> hsep [text "Internal error:",  text s])
 
 instance (Pretty a) => Pretty (Set a) where
   pretty = braces . hcat . L.intersperse (char ',') . map pretty . Set.toList

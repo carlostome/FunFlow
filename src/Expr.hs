@@ -29,6 +29,7 @@ data ExprF a r
   | LCase   r Name Name r r
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
+-- | Annotated expression type.
 data AnnF p a = AnnF a (ExprF p (AnnF p a))
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
@@ -37,13 +38,15 @@ ann = AnnF
 getann :: AnnF p a -> a
 getann (AnnF a _) = a
 
-type Expr p = AnnF p ()
+-- | Usefull synonym
+type Expr p a = AnnF p a
 
+-- | Allowed binary operations
 data Op
    = Add | Sub | Mul | Div
   deriving (Eq)
 
-bin :: Name -> Expr p -> Expr p -> Expr p
+bin :: Name -> Expr a () -> Expr a () -> Expr a ()
 bin op a b = AnnF () (Oper r a b)
   where
     r = case op of
@@ -51,6 +54,9 @@ bin op a b = AnnF () (Oper r a b)
          "-" -> Sub
          "*" -> Mul
          "/" -> Div
+
+--------------------------------------------------------------------------------
+-- Various Show and Pretty instances
 
 instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
   pretty (Integer n) = pretty n
