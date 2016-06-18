@@ -38,13 +38,20 @@ this will copy it to stack binaries folder.
 
 ## Usage
 
-### As a library
+### As a library (prefered)
 
 The easiest way to play with this library is to use it in a live ghci session.
 In order to do so, just type `stack repl` in the project folder. The examples
 are contained in the src/Examples.hs file
 
+The function `runExpr` defined in src/FunFlow.hs performs parsing and analysis
+on a string containing the program.
+
+Also src/FunFlow.hs exports the function `runFile` which reads, parses and
+executes the analysis of a given file.
 
 ### As an executable
 
 Once installed, run funflow FILE. File examples can be found under examples/.
+However is more recomendable the previous methods as all interesting examples
+are coded as strings in the file src/Examples.hs.
