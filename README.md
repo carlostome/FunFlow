@@ -1,6 +1,13 @@
 # Control Flow Analysis
 
-Control flow analysis
+Control flow analysis for a lambda calculus like language with integers,
+booleans and explicit recursion operator. It is based on the language presented
+in chapter 5 of [Principles of program
+analysis](http://www.imm.dtu.dk/~hrni/PPA/ppasup2004.html).
+
+However, the implementation differs from the one in the book as the subeffecting
+of control-flow annotations is presented as a separate rule which prevents to
+some extent poisoning.
 
 ## Installation
 
