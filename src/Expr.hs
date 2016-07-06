@@ -2,16 +2,19 @@
 {-# LANGUAGE DeriveFunctor  #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Expr where
 
 import           Data.Bifunctor.TH
 import           Text.PrettyPrint.ANSI.Leijen as PP
+import Data.Bitraversable
+import Data.Traversable
 
 type Name  = String  -- For identifier names
 
 -- | Usefull synonym
-type Expr p a = AnnF p a
+type Expr p = BiFix ExprF p
 
 -- | Expr type parametrized over program points
 -- and recursive construction.
@@ -32,25 +35,13 @@ data ExprF a r
   | LCase   r Name Name r r
   deriving (Eq, Show, Functor, Foldable, Traversable)
 
--- | Annotated expression type.
-data AnnF p a = AnnF a (ExprF p (AnnF p a))
-  deriving (Eq, Show, Functor, Foldable, Traversable)
-
--- | Smart constructor
-ann = AnnF
-
--- | Usefull for getting top annotation
-getann :: AnnF p a -> a
-getann (AnnF a _) = a
-
-
 -- | Allowed binary operations
 data Op
    = Add | Sub | Mul | Div
   deriving (Eq)
 
-bin :: Name -> Expr a () -> Expr a () -> Expr a ()
-bin op a b = AnnF () (Oper r a b)
+bin :: Name -> Expr a -> Expr a -> Expr a
+bin op a b = BiFix (Oper r a b)
   where
     r = case op of
          "+" -> Add
@@ -58,10 +49,21 @@ bin op a b = AnnF () (Oper r a b)
          "*" -> Mul
          "/" -> Div
 
+newtype BiFix f a = BiFix { unBiFix :: f a (BiFix f a) }
+
+instance Bitraversable f => Functor (BiFix f) where
+  fmap = fmapDefault
+
+instance Bitraversable f => Foldable (BiFix f) where
+  foldMap = foldMapDefault
+
+instance Bitraversable f => Traversable (BiFix f) where
+  traverse f x = fmap BiFix $ bitraverse f (traverse f) $ unBiFix x
+
 --------------------------------------------------------------------------------
 -- Various Show and Pretty instances                                          --
 
-instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
+instance (Pretty a, Pretty p) => Pretty (ExprF p a) where
   pretty (Integer n) = pretty n
   pretty (Bool b)    = pretty b
   pretty (Var n)     = text n
@@ -73,7 +75,7 @@ instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
   pretty (App e1 e2) =
     parens $ hsep [pretty e1 , pretty e2]
   pretty (Let n e e2) =
-    hsep [bold $ text "let", text n, bold (char '='), pretty e, text ":", pretty (getann e), bold $ text "in"]
+    hsep [bold $ text "let", text n, bold (char '='), pretty e, bold $ text "in"]
     PP.<$>
     pretty e2
   pretty (ITE c e t) =
@@ -99,8 +101,8 @@ instance (Pretty a, Pretty p) => Pretty (ExprF p (AnnF p a)) where
                        ,pretty e1]
                 , hsep [bold . text $ "or", pretty e2]]]
 
-instance (Pretty p, Pretty a) => Pretty (AnnF p a) where
-  pretty (AnnF _ e)   = pretty e
+instance (Pretty (f a (BiFix f a)), Pretty a) => Pretty (BiFix f a) where
+  pretty (BiFix f) = pretty f
 
 instance Show Op where
   show op = case op of
@@ -108,11 +110,6 @@ instance Show Op where
     Sub ->  "-"
     Mul ->  "*"
     Div ->  "/"
-
 $(deriveBifunctor ''ExprF)
 $(deriveBifoldable ''ExprF)
 $(deriveBitraversable ''ExprF)
-
-$(deriveBifunctor ''AnnF)
-$(deriveBifoldable ''AnnF)
-$(deriveBitraversable ''AnnF)

@@ -22,7 +22,7 @@ runFile file = parseFile file >>= run
 -- | Run the analysis on a string
 runExpr      = run . parseExpr
 
-run :: AnnF () () -> IO ()
+run :: Expr () -> IO ()
 run p = do
   putStrLn "----------------------------------------------"
   putStrLn "-- Original program annotated with PP"
@@ -48,7 +48,7 @@ printDoc doc = displayIO stdout (renderPretty 0.4 100 (pretty doc))
               >> putChar '\n'
 
 -- |Parse and label program
-parseFile :: String -> IO (AnnF () ())
+parseFile :: String -> IO (Expr ())
 parseFile programName = do
   let fileName = programName
   content <- readFile fileName

@@ -16,46 +16,46 @@ import Text.ParserCombinators.UU.BasicInstances (Parser,pSym)
 
 -- * Top-Level Parsers
 
-parseExpr :: String -> AnnF () ()
+parseExpr :: String -> Expr ()
 parseExpr = runParser "stdin" pExpr
 
 -- * Parsing the FUN language
-pExpr :: Parser (AnnF () ())
+pExpr :: Parser (Expr ())
 pExpr = (pFn <|> pFun <|> pITE <|> pLet <|> pPair <|> pLCons <|> pPCase
         <|> pLCase) <<|> pBin
   where
 
   -- literal expressions
-  pLit :: Parser (AnnF () ())
-  pLit = (AnnF () . Integer) <$> pInteger
-     <|> (AnnF () . Bool) True  <$ pSymbol "true"
-     <|> (AnnF () . Bool) False <$ pSymbol "false"
-     <|> AnnF () (LNil ()) <$ pSymbol "Nil"
+  pLit :: Parser (Expr ())
+  pLit = (BiFix . Integer) <$> pInteger
+     <|> (BiFix . Bool) True  <$ pSymbol "true"
+     <|> (BiFix . Bool) False <$ pSymbol "false"
+     <|> BiFix (LNil ()) <$ pSymbol "Nil"
 
   -- atomic expressions
   pAtom = pLit
-     <<|> (AnnF () . Var) <$> pIdent
+     <<|> (BiFix . Var) <$> pIdent
      <<|> pParens pExpr
 
   -- simple expressions
-  pFn,pFun,pLet,pITE :: Parser (AnnF () ())
-  pFn     = AnnF () <$> iI (Fn ())  "fn" pIdent "=>" pExpr Ii -- Default Pi to 0
-  pFun    = AnnF () <$> iI (Fun ()) "fun" pIdent pIdent "=>" pExpr Ii -- Dito
-  pLet    = AnnF () <$> iI Let "let" pIdent "=" pExpr "in" pExpr Ii
-  pITE    = AnnF () <$> iI ITE "if" pExpr "then" pExpr "else" pExpr Ii
+  pFn,pFun,pLet,pITE :: Parser (Expr ())
+  pFn     = BiFix <$> iI (Fn ())  "fn" pIdent "=>" pExpr Ii -- Default Pi to 0
+  pFun    = BiFix <$> iI (Fun ()) "fun" pIdent pIdent "=>" pExpr Ii -- Dito
+  pLet    = BiFix <$> iI Let "let" pIdent "=" pExpr "in" pExpr Ii
+  pITE    = BiFix <$> iI ITE "if" pExpr "then" pExpr "else" pExpr Ii
 
-  pPair,pPCase :: Parser (AnnF () ())
-  pPair   = AnnF () <$> iI (Pair ()) "Pair" "(" pExpr "," pExpr ")" Ii
-  pPCase  = AnnF () <$> iI PCase "pcase" pExpr "of" "Pair" "(" pIdent "," pIdent ")" "=>"
+  pPair,pPCase :: Parser (Expr ())
+  pPair   = BiFix <$> iI (Pair ()) "Pair" "(" pExpr "," pExpr ")" Ii
+  pPCase  = BiFix <$> iI PCase "pcase" pExpr "of" "Pair" "(" pIdent "," pIdent ")" "=>"
                pExpr Ii
 
-  pLCons, pLCase :: Parser (AnnF () ())
-  pLCons   = AnnF () <$> iI (LCons ()) "Cons" "(" pExpr "," pExpr ")" Ii
-  pLCase   = AnnF () <$> iI LCase "lcase" pExpr "of" "Cons" "(" pIdent "," pIdent ")" "=>"
+  pLCons, pLCase :: Parser (Expr ())
+  pLCons   = BiFix <$> iI (LCons ()) "Cons" "(" pExpr "," pExpr ")" Ii
+  pLCase   = BiFix <$> iI LCase "lcase" pExpr "of" "Cons" "(" pIdent "," pIdent ")" "=>"
                pExpr "or" pExpr Ii
 
   -- chained expressions
-  pApp = pChainl_ng ((\x y -> AnnF () (App x y)) <$ pSpaces) pAtom
+  pApp = pChainl_ng ((\x y -> BiFix (App x y)) <$ pSpaces) pAtom
   pBin = pChainl_ng (bin <$> pOper) pApp
 
 pIdent,pConst,pOper :: Parser Name

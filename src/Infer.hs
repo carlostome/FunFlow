@@ -2,6 +2,8 @@
 {-# LANGUAGE DeriveFunctor     #-}
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE TupleSections     #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE UndecidableInstances #-}
 module Infer where
 
 import           Expr
@@ -13,8 +15,9 @@ import           Control.Monad.Trans.Class    (lift)
 import           Control.Monad.Trans.Except
 import           Data.Bifoldable              (bifoldMap, bifoldl)
 import           Data.Bifunctor               (first)
+import Data.Bifunctor.Wrapped
 import           Data.Bifunctor.TH
-import           Data.Bitraversable           (bimapAccumL, bimapM)
+import           Data.Bitraversable           
 import           Data.Foldable                (toList)
 import qualified Data.List                    as List
 import           Data.Map                     (Map)
@@ -25,14 +28,16 @@ import           Data.Set                     (Set)
 import qualified Data.Set                     as Set
 import           Text.PrettyPrint.ANSI.Leijen (Pretty (..))
 import qualified Text.PrettyPrint.ANSI.Leijen as PP hiding (empty)
+import Control.Comonad.Cofree
+import Data.Traversable
 
 
 -- | Top level function for analyzing an Expr.
 -- It outputs the type annotated Expr and its type.
-analyzeExpr :: AnnF Pi ()
+analyzeExpr :: Expr Pi
             -> Either TypeError
-                      ( Expr Pi TypeAnn   -- ^ Expr annotated with types and PP
-                      , TypeAnn )         -- ^ Type of expr with PP
+                      ( AnnExpr Pi TypeAnn   -- ^ Expr annotated with types and PP
+                      , TypeAnn )            -- ^ Type of expr with PP
 analyzeExpr e = do
   (an, t, s, c) <- runGenFrom '`' . runGenT
                  . runExceptT . algorithmW (Env Map.empty) $ e
@@ -71,8 +76,8 @@ type TypeSubst = Subst AnnVar TyVar
 type TypeConstr = Constraint Pi AnnVar
 
 -- | Make program points unique.
-uniquifyPPoints :: Expr () a -> Expr Pi a
-uniquifyPPoints = snd . bimapAccumL (\acc _ -> (succ acc, acc)) (\a d -> (a,d)) 'P'
+uniquifyPPoints :: Expr () -> Expr Pi
+uniquifyPPoints = snd . mapAccumL (\p _ -> (succ p, p)) 'P'
 
 -- | Fresh type variables
 freshTyVar :: InferM (Ty b TyVar)
@@ -82,26 +87,29 @@ freshTyVar = lift . lift $ TyV <$> gen
 freshAnnVar :: InferM AnnVar
 freshAnnVar = gen
 
+-- | Annotated expression with PP and type
+type AnnExpr p t = Cofree (ExprF p) t
+
 -- | Main algorithm-W implementation.
 -- It make use of Maybe monad to handle
 -- failure and Gen monad to generate fresh
 -- type and annotation variables.
 algorithmW :: TypeEnv
-           -> Expr Pi ()
-           -> InferM ( Expr Pi Type                 -- ^ Expression annotated with type
+           -> Expr Pi
+           -> InferM ( AnnExpr Pi Type                 -- ^ Expression annotated with type
                      , Type                         -- ^ Type of the expression
                      , TypeSubst                    -- ^ Substitution
                      , Set TypeConstr )             -- ^ Set of generated constraints
-algorithmW env (AnnF _ expr) =
+algorithmW env (BiFix expr) =
   case expr of
     Integer n ->
-      return ( ann I (Integer n)
+      return ( I :< Integer n
              , I
              , mempty
              , mempty)
 
     Bool    b ->
-      return ( ann I (Bool b)
+      return ( I :< Bool b
              , B
              , mempty
              , mempty)
@@ -112,7 +120,7 @@ algorithmW env (AnnF _ expr) =
           throwE (TyErrLookup n)
         Just ty -> do
           i  <- lift . lift $ instantiate ty
-          return ( ann i (Var n) 
+          return ( i :< Var n 
                  , i
                  , mempty
                  , mempty)
@@ -129,7 +137,7 @@ algorithmW env (AnnF _ expr) =
 
       let t = apply (phi2 <> phi1) $ TyArrow a_0 b_0 t1
 
-      return ( ann t (Fun pi f x e')
+      return ( t :< Fun pi f x e'
              , t
              , phi2 <> phi1
              , (b_0 >: pi) <> c1)
@@ -143,7 +151,7 @@ algorithmW env (AnnF _ expr) =
 
       let t = apply phi $ TyArrow a_0 b_0 t1
 
-      return ( ann t (Fn pi f e')
+      return ( t :< Fn pi f e'
              , t
              , phi
              , (b_0 >: pi) <>  c0)
@@ -159,7 +167,7 @@ algorithmW env (AnnF _ expr) =
 
       let t = apply phi3 a_0
 
-      return ( ann t (App e1' e2')
+      return ( t :< App e1' e2'
              , t
              , phi3 <> phi2 <> phi1
              , c1 <> c2 <> apply phi3 t2 `flows` apply (phi3 <> phi2) t1)
@@ -171,7 +179,7 @@ algorithmW env (AnnF _ expr) =
 
       (e2', t, phi2, c2)  <- algorithmW (extEnv n (generalize (toList nEnv) t1) nEnv) e2
 
-      return ( ann t (Let n e1' e2')
+      return ( t :< Let n e1' e2'
              , t
              , phi2 <> phi1
              , c1 <> c2)
@@ -186,7 +194,7 @@ algorithmW env (AnnF _ expr) =
 
       (c, t)  <- subeffect (apply (phi5 <> phi4 <> phi3) t2) (apply (phi5 <> phi4 ) t3)
 
-      return ( ann t (ITE e1' e2' e3')
+      return ( t :< ITE e1' e2' e3'
              , t
              , phi5 <> phi4 <> phi3 <> phi2 <> phi1
              , c1 <> c2 <> c3 <> c)
@@ -204,7 +212,7 @@ algorithmW env (AnnF _ expr) =
       phi3 <-  unify (apply phi2 t1) tOp
       phi4 <-  unify (apply phi3 t2) tOp
 
-      return ( ann tOp (Oper op e1' e2')
+      return ( tOp :< Oper op e1' e2'
              , tOp
              , phi4 <> phi3 <> phi2 <> phi1
              , c1 <> c2)
@@ -218,7 +226,7 @@ algorithmW env (AnnF _ expr) =
 
       let t = TyPair (apply phi2 t1) b_0 t2
 
-      return ( ann t (Pair pi e1' e2')
+      return ( t :< Pair pi e1' e2'
              , t
              , phi2 <> phi1
              , c1 <> c2 <> b_0 >: pi)
@@ -233,7 +241,7 @@ algorithmW env (AnnF _ expr) =
       (e2', t2, phi2, c2) <- algorithmW (extEnv x2 (apply phi1 (Base a_1))
                           $ extEnv x1 (apply phi1 (Base a_0)) $ apply (phi1 <> phi0) env) e2
 
-      return ( ann t2 (PCase e0' x1 x2 e2')
+      return ( t2 :< PCase e0' x1 x2 e2'
              , t2
              , phi2 <> phi1
              , c0 <> c2)
@@ -245,7 +253,7 @@ algorithmW env (AnnF _ expr) =
 
         let t = TyList b_0 a_0
 
-        return ( ann t (LNil pi)
+        return ( t :< LNil pi
                , t
                , mempty
                , b_0 >: pi)
@@ -260,7 +268,7 @@ algorithmW env (AnnF _ expr) =
 
         (c,t) <- subeffect (apply (phi2 <> phi1) t1) (TyList b_0 (apply (phi2 <> phi1 <> phi0) t0))
 
-        return ( ann t (LCons pi e0' e1')
+        return ( t :< LCons pi e0' e1'
                , t
                , phi2 <> phi1 <> phi0
                , c0 <> c1 <> (b_0 >: pi) <> c )
@@ -285,7 +293,7 @@ algorithmW env (AnnF _ expr) =
 
       (c,t) <- subeffect (apply (phi4 <> phi3) t1) (apply phi4 t2)
 
-      return ( ann t (LCase e0' hd tl e1' e2')
+      return ( t :< LCase e0' hd tl e1' e2'
              , t
              , phi4 <> phi3 <> phi2 <> phi1 <> phi0
              , c0 <> c1 <> c2 <> c)
@@ -432,3 +440,6 @@ instance (Pretty a, Pretty b) => Pretty (TyErr b a) where
           PP.hsep  [ PP.text "Cannot", PP.underline $ PP.text "unify"
                    , PP.bold $ pretty t, PP.text "with", PP.bold $ pretty k]
         TyErrLookup s -> PP.hsep [PP.text "Variable unbound:",  PP.text s])
+
+instance (Pretty (f (Cofree f a)), Pretty a) => Pretty (Cofree f a) where
+  pretty (a :< as) = PP.hcat [pretty as, PP.colon, pretty a]

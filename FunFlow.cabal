@@ -27,7 +27,8 @@ library
                     ansi-wl-pprint,
                     monad-gen,
                     bifunctors,
-                    recursion-schemes
+                    recursion-schemes,
+                    free
 
   hs-source-dirs  : src
 
